@@ -1,0 +1,38 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+textarea.answer {
+  min-height: 60px;
+}
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.small {
+  padding: var(--space-1) var(--space-3);
+  font-size: 0.85rem;
+}
+
+.muted {
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+}
+
+.unsaved {
+  color: var(--color-warning);
+  font-size: 0.85rem;
+  font-weight: 600;
+}

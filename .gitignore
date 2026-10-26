@@ -1,0 +1,23 @@
+node_modules/
+target/
+
+# Build outputs
+frontend/dist/
+desktop/dist/
+desktop/renderer/
+desktop/release/
+desktop/release-installer/
+
+# Downloaded Java runtime (see scripts/fetch-jre.ps1)
+desktop/resources/jre/
+
+# Local data and logs
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,7 @@
+**/node_modules
+**/target
+**/dist
+desktop/release
+desktop/renderer
+desktop/resources/jre
+.git

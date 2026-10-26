@@ -1,0 +1,1735 @@
+openapi: 3.0.3
+info:
+  title: Day Tracker local API
+  version: 1.0.0
+  description: >
+    REST API served by the bundled Spring Boot backend on 127.0.0.1. It is called
+    only by the Electron main process, which authenticates with the per-launch
+    bearer token. This document covers what is implemented so far (health,
+    tasks, categories, books, reading sessions, reading goals, appointments,
+    daily reviews, book covers, the calendar and selected-day queries, progress
+    reports, settings, CSV exports, and backups); later sprints extend it. Only the cover search and cover download
+    reach the internet, and only when the user asks for them.
+servers:
+  - url: http://127.0.0.1:{port}/api/v1
+    variables:
+      port:
+        default: '0'
+        description: Assigned by the operating system at startup.
+security:
+  - launchToken: []
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Readiness and API version
+      responses:
+        '200':
+          description: The backend is ready.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /calendar:
+    get:
+      operationId: getCalendarRange
+      summary: Compact calendar items for a date range
+      description: >
+        Non-archived tasks by planned date, ordered by date, then creation time.
+        The range may cover at most 93 days.
+      parameters:
+        - name: from
+          in: query
+          required: true
+          description: First date, inclusive.
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          description: End date, exclusive. Must be after from.
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: The items in the range.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CalendarRange'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /days/{date}:
+    get:
+      operationId: getDay
+      summary: Everything shown for one selected date
+      parameters:
+        - name: date
+          in: path
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: The day's records.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Day'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /tasks:
+    get:
+      operationId: listTasks
+      summary: Search and filter tasks, newest first (createdAt descending, then id)
+      parameters:
+        - name: q
+          in: query
+          description: Text to find in the title or description (case-insensitive for ASCII).
+          schema: { type: string, maxLength: 200 }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/TaskStatus' }
+        - name: priority
+          in: query
+          schema: { $ref: '#/components/schemas/TaskPriority' }
+        - name: categoryId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: plannedFrom
+          in: query
+          description: Planned on or after this date.
+          schema: { type: string, format: date }
+        - name: plannedTo
+          in: query
+          description: Planned before this date.
+          schema: { type: string, format: date }
+        - name: scheduled
+          in: query
+          description: false returns only tasks without a planned date.
+          schema: { type: boolean }
+        - name: archived
+          in: query
+          description: true returns archived tasks instead of normal ones.
+          schema: { type: boolean, default: false }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: One page of tasks.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskPage'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createTask
+      summary: Create a task
+      description: >
+        The client generates the id. Repeating a create with the same id and the
+        same payload returns the existing task with 200; the same id with a
+        different payload returns 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskRequest'
+      responses:
+        '201':
+          description: The task was created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '200':
+          description: An identical create was replayed; the existing task is returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: A different task already exists with this id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /tasks/{id}:
+    get:
+      operationId: getTask
+      summary: Task details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The task.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateTask
+      summary: Edit fields, status, or archive state
+      description: >
+        Only the properties present in the body are changed; null clears a nullable
+        one. The version must be the one last read: a stale version returns 409 and
+        changes nothing. completedAt is set when the status becomes DONE and cleared
+        when it leaves DONE; a request that changes nothing returns the task as it is,
+        without a new version.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTaskRequest'
+      responses:
+        '200':
+          description: The saved task.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /tasks/{id}/activity:
+    get:
+      operationId: getTaskActivity
+      summary: The history of a task, oldest first
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Every recorded change.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TaskActivity' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /categories:
+    get:
+      operationId: listCategories
+      summary: Every category, archived ones included, by name
+      responses:
+        '200':
+          description: The categories.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Category' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createCategory
+      summary: Create a category
+      description: >
+        Names are unique ignoring letter case, including archived categories.
+        Idempotent by client-generated id, like task creation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, name, color]
+              properties:
+                id: { type: string, format: uuid }
+                name: { type: string, description: 1 to 50 characters after trimming. }
+                color: { type: string, pattern: '^#[0-9a-fA-F]{6}$' }
+      responses:
+        '201':
+          description: The category was created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+        '200':
+          description: An identical create was replayed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /categories/{id}:
+    patch:
+      operationId: updateCategory
+      summary: Rename, recolor, archive, or restore
+      description: Archiving keeps the category on records that already use it.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer, minimum: 1 }
+                name: { type: string }
+                color: { type: string, pattern: '^#[0-9a-fA-F]{6}$' }
+                archived: { type: boolean }
+      responses:
+        '200':
+          description: The saved category.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Category'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /books:
+    get:
+      operationId: listBooks
+      summary: Books, those being read first, then by title
+      parameters:
+        - name: archived
+          in: query
+          description: true returns archived books instead of current ones.
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: The books with their derived position and effort.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Book' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createBook
+      summary: Add a book
+      description: Idempotent by client-generated id, like task creation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, title, totalPages]
+              properties:
+                id: { type: string, format: uuid }
+                title: { type: string, description: 1 to 300 characters after trimming. }
+                author: { type: string, nullable: true, maxLength: 200 }
+                totalPages: { type: integer, minimum: 1, maximum: 100000 }
+                initialPage: { type: integer, minimum: 0, default: 0, description: At most totalPages. }
+                status:
+                  allOf: [{ $ref: '#/components/schemas/BookStatus' }]
+                  default: TO_READ
+      responses:
+        '201':
+          description: The book was created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Book'
+        '200':
+          description: An identical create was replayed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Book'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /books/{id}:
+    get:
+      operationId: getBook
+      summary: Book details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The book.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Book'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateBook
+      summary: Edit details, status, or archive state
+      description: >
+        Omitted properties are unchanged; an empty author clears it. Finishing a
+        book is an explicit status change. totalPages cannot be lowered below an
+        ending page recorded by a non-deleted session (400). A stale version
+        returns 409.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer, minimum: 1 }
+                title: { type: string }
+                author: { type: string }
+                totalPages: { type: integer, minimum: 1 }
+                initialPage: { type: integer, minimum: 0 }
+                status: { $ref: '#/components/schemas/BookStatus' }
+                archived: { type: boolean }
+      responses:
+        '200':
+          description: The saved book.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Book'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /book-suggestions:
+    get:
+      operationId: suggestBooks
+      summary: Books matching typed text, for filling in the book form
+      description: >
+        Sends the text to openlibrary.org and returns up to 8 works, best matches
+        first. Answers are kept in memory for 15 minutes, so repeating a search
+        does not repeat the request. totalPages is the median page count across
+        editions; coverId can be passed to PUT /books/{id}/cover.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Plain words; search syntax such as quotes, colons, or parentheses is ignored.
+          schema: { type: string, minLength: 3, maxLength: 200 }
+        - name: tech
+          in: query
+          description: true limits results to books filed under computing subjects (programming, software, databases, ...).
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: The suggestions; empty when nothing matched.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/BookSuggestion' }
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '502':
+          $ref: '#/components/responses/CoverSourceUnavailable'
+  /books/{id}/cover:
+    get:
+      operationId: getBookCover
+      summary: The stored cover image of a book
+      description: >
+        Served to the Electron main process, which passes it to the page through
+        the private dt-cover scheme. The type is decided from the image bytes.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The cover.
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      operationId: useOpenLibraryCover
+      summary: Download a chosen cover once and store it as the book's cover
+      description: >
+        source and sourceId come from the cover-candidates list or a book
+        suggestion. For OPEN_LIBRARY (the default) sourceId is a cover id and the
+        large size is used, or the medium one when there is no large one. For
+        GOOGLE_BOOKS sourceId is an ISBN; Google's "image not available"
+        placeholder is refused (404). Replaces any earlier cover.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sourceId]
+              properties:
+                source: { $ref: '#/components/schemas/CoverSource' }
+                sourceId: { type: string, description: 'An Open Library cover id, or an ISBN-10/13 for GOOGLE_BOOKS.' }
+      responses:
+        '200':
+          description: The book, with its new coverUpdatedAt.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Book'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/CoverSourceUnavailable'
+    delete:
+      operationId: removeBookCover
+      summary: Remove the cover; the book shows its placeholder again
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204':
+          description: The book has no cover.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /books/{id}/cover/file:
+    put:
+      operationId: uploadBookCover
+      summary: Store an image file chosen by the user as the cover
+      description: The raw bytes of a JPEG, PNG, or WebP image of at most 2 MB. Replaces any earlier cover.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream: { schema: { type: string, format: binary } }
+      responses:
+        '200':
+          description: The book, with its new coverUpdatedAt.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Book'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /books/{id}/cover-candidates:
+    get:
+      operationId: findBookCovers
+      summary: Search Open Library for covers by the book's title and author
+      description: Up to 12 works that have a cover, best matches first. Sends the title and author to openlibrary.org.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The candidates; empty when nothing matched.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CoverCandidate' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/CoverSourceUnavailable'
+  /cover-candidates/open-library/{coverId}/image:
+    get:
+      operationId: previewOpenLibraryCover
+      summary: A medium-size preview of a candidate's cover; not stored
+      parameters:
+        - name: coverId
+          in: path
+          required: true
+          schema: { type: string, pattern: '^\d{1,12}$' }
+      responses:
+        '200':
+          description: The preview.
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/CoverSourceUnavailable'
+  /cover-candidates/google-books/{isbn}/image:
+    get:
+      operationId: previewGoogleBooksCover
+      summary: The Google Books cover of an ISBN, for confirmation; not stored
+      parameters:
+        - name: isbn
+          in: path
+          required: true
+          schema: { type: string, pattern: '^(\d{9}[\dX]|\d{13})$' }
+      responses:
+        '200':
+          description: The preview.
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '502':
+          $ref: '#/components/responses/CoverSourceUnavailable'
+  /reading-sessions:
+    get:
+      operationId: listReadingSessions
+      summary: Non-deleted reading sessions, newest date first
+      parameters:
+        - name: bookId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: from
+          in: query
+          description: Activity date on or after this date.
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          description: Activity date before this date.
+          schema: { type: string, format: date }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: size
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: One page of sessions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, page, size, total]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ReadingSession' }
+                  page: { type: integer }
+                  size: { type: integer }
+                  total: { type: integer }
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createReadingSession
+      summary: Record a reading session
+      description: >
+        Several sessions on one date and backdated sessions are allowed; a future
+        activity date is rejected. pagesRead is effort; endingPage is an optional
+        position and is never used to derive effort. Idempotent by client-generated id.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, bookId, activityDate, pagesRead]
+              properties:
+                id: { type: string, format: uuid }
+                bookId: { type: string, format: uuid, description: An existing, non-archived book. }
+                activityDate: { type: string, format: date }
+                pagesRead: { type: integer, minimum: 1, maximum: 10000 }
+                endingPage: { type: integer, minimum: 0, nullable: true, description: At most the total pages of the book. }
+                notes: { type: string, nullable: true, maxLength: 5000 }
+      responses:
+        '201':
+          description: The session was recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadingSession'
+        '200':
+          description: An identical create was replayed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadingSession'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /reading-sessions/{id}:
+    patch:
+      operationId: updateReadingSession
+      summary: Correct a session
+      description: >
+        Only the properties present are changed; null removes the ending page or
+        the notes. Every total that includes the session is derived, so its day,
+        week, and book reflect the correction immediately.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer, minimum: 1 }
+                activityDate: { type: string, format: date }
+                pagesRead: { type: integer, minimum: 1 }
+                endingPage: { type: integer, minimum: 0, nullable: true }
+                notes: { type: string, nullable: true }
+      responses:
+        '200':
+          description: The saved session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadingSession'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      operationId: deleteReadingSession
+      summary: Soft-delete a session
+      description: The session stops counting in every total. Repeating the delete returns 204 again.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: version
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '204':
+          description: The session is deleted.
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /reading-goals:
+    get:
+      operationId: listReadingGoals
+      summary: Daily target history, oldest effective date first
+      description: Before the first entry takes effect the target is 30 pages.
+      responses:
+        '200':
+          description: The recorded targets.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ReadingGoal' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /reading-goals/{effectiveDate}:
+    put:
+      operationId: setReadingGoal
+      summary: Set the daily target from a date onward
+      description: Earlier dates keep the target that applied to them. Setting the same date again replaces that entry.
+      parameters:
+        - name: effectiveDate
+          in: path
+          required: true
+          schema: { type: string, format: date }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetPages]
+              properties:
+                targetPages: { type: integer, minimum: 1, maximum: 5000 }
+      responses:
+        '200':
+          description: The saved target.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadingGoal'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /events:
+    get:
+      operationId: listEvents
+      summary: Appointments that appear on any date in a range
+      description: >
+        Timed events are matched by their instants against the dates in this
+        computer's timezone; all-day events by date. At most 93 days. All-day
+        events first, then by start.
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          description: Exclusive.
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: The appointments.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Event' }
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createEvent
+      summary: Create an appointment
+      description: >
+        A timed event sends start, end and timezone; an all-day event sends
+        startDate and endDateExclusive; the other kind's fields must be absent.
+        Overlapping another appointment is allowed. Idempotent by client-generated id.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, title, allDay]
+              properties:
+                id: { type: string, format: uuid }
+                title: { type: string, description: 1 to 200 characters after trimming. }
+                notes: { type: string, nullable: true, maxLength: 5000 }
+                categoryId: { type: string, format: uuid, nullable: true }
+                allDay: { type: boolean }
+                start: { type: string, example: '2026-10-09T22:00', description: Timed only. Wall-clock time in timezone. }
+                end: { type: string, example: '2026-10-10T02:00', description: Timed only. Must be after start. }
+                timezone: { type: string, example: America/Sao_Paulo, description: Timed only. IANA region identifier. }
+                startDate: { type: string, format: date, description: All-day only. }
+                endDateExclusive: { type: string, format: date, description: All-day only. After startDate. }
+      responses:
+        '201':
+          description: The appointment was created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+        '200':
+          description: An identical create was replayed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /events/{id}:
+    get:
+      operationId: getEvent
+      summary: Appointment details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The appointment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateEvent
+      summary: Replace the editable fields of an appointment
+      description: >
+        Every editable field is sent, because an appointment can switch between
+        timed and all-day. A stale version returns 409.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version, title, allDay]
+              properties:
+                version: { type: integer, minimum: 1 }
+                title: { type: string, description: 1 to 200 characters after trimming. }
+                notes: { type: string, nullable: true, maxLength: 5000 }
+                categoryId: { type: string, format: uuid, nullable: true }
+                allDay: { type: boolean }
+                start: { type: string, example: '2026-10-09T22:00', description: Timed only. Wall-clock time in timezone. }
+                end: { type: string, example: '2026-10-10T02:00', description: Timed only. Must be after start. }
+                timezone: { type: string, example: America/Sao_Paulo, description: Timed only. IANA region identifier. }
+                startDate: { type: string, format: date, description: All-day only. }
+                endDateExclusive: { type: string, format: date, description: All-day only. After startDate. }
+      responses:
+        '200':
+          description: The saved appointment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+    delete:
+      operationId: deleteEvent
+      summary: Delete an appointment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: version
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '204':
+          description: Deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /reviews/{date}:
+    get:
+      operationId: getReview
+      summary: The review of one date
+      parameters:
+        - name: date
+          in: path
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: The review.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DailyReview'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      operationId: saveReview
+      summary: Create or update the review of one date
+      description: >
+        The first save sends no version; later saves send the version they
+        loaded. Anything else returns 409 and changes nothing. Future dates are
+        rejected. Each answer is plain text of at most 5000 characters.
+      parameters:
+        - name: date
+          in: path
+          required: true
+          schema: { type: string, format: date }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version: { type: integer, nullable: true }
+                wins: { type: string, maxLength: 5000 }
+                obstacles: { type: string, maxLength: 5000 }
+                tomorrowPriority: { type: string, maxLength: 5000 }
+      responses:
+        '200':
+          description: The saved review.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DailyReview'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /progress:
+    get:
+      operationId: getProgress
+      summary: A progress report for an interval
+      description: >
+        Tasks completed are tasks currently DONE whose completedAt falls in the
+        interval, counted on the date of that time in the configured timezone.
+        Archived tasks keep counting; reopened tasks do not. Pages read are the sum
+        of non-deleted sessions dated in the interval; reading days are the distinct
+        dates with pages read; each day carries the target in force on it. Rates
+        cover only the days up to and including today, so a week in progress is
+        judged on the days elapsed, and a period that has not begun has null rates.
+        Percentages are not capped. There is no combined score. At most 366 days.
+      parameters:
+        - name: from
+          in: query
+          required: true
+          description: First date, inclusive.
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          description: End date, exclusive.
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: The report for the interval.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Progress'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /settings:
+    get:
+      operationId: getSettings
+      summary: The application settings
+      description: >
+        The timezone is stored explicitly. On the first run it is taken from the
+        computer once; later runs never re-derive it.
+      responses:
+        '200':
+          description: The settings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Settings'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    patch:
+      operationId: updateSettings
+      summary: Changes some settings
+      description: >
+        Only the properties present change. Changing the timezone changes which
+        date today is and which date a completion time falls on; reading and
+        review dates already recorded, and all-day events, keep their dates.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSettingsRequest'
+      responses:
+        '200':
+          description: The settings after the change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Settings'
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /exports/{dataset}:
+    get:
+      operationId: exportCsv
+      summary: A dataset as a CSV file
+      description: >
+        UTF-8 with a byte-order mark, CRLF line ends, quoted where needed. Text that
+        a spreadsheet would run as a formula (starting with =, +, -, or @, or a tab
+        or carriage return) is prefixed with an apostrophe. Tasks, reading sessions,
+        and appointments are cut at 100,000 rows (header X-Export-Truncated true);
+        summaries cover the given dates, by default the last 90 days, at most 366.
+      parameters:
+        - name: dataset
+          in: path
+          required: true
+          schema: { type: string, enum: [tasks, reading-sessions, appointments, summaries] }
+        - name: from
+          in: query
+          required: false
+          description: Summaries only. First date, inclusive.
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: false
+          description: Summaries only. End date, exclusive.
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: The file.
+          headers:
+            Content-Disposition: { schema: { type: string } }
+            X-Export-Truncated: { schema: { type: string, enum: ['true', 'false'] } }
+          content:
+            text/csv:
+              schema: { type: string, format: binary }
+        '400':
+          $ref: '#/components/responses/InvalidRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /backups:
+    get:
+      operationId: getBackups
+      summary: The backup folder, its backups, and what the last attempt did
+      responses:
+        '200':
+          description: The backup status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createBackup
+      summary: Makes a consistent, verified backup now
+      description: >
+        Uses VACUUM INTO, then checks integrity and records the schema and
+        application version beside the file. A failure removes the partial file,
+        is remembered as the last attempt, and is answered with BACKUP_FAILED;
+        it is never reported as a success. Manual backups are never deleted
+        automatically; at most one automatic backup is made per day and the newest
+        seven are kept.
+      responses:
+        '201':
+          description: The backup was written and checked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupInfo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          description: The backup could not be written (code BACKUP_FAILED).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /lifecycle/restore/validate:
+    post:
+      operationId: validateRestore
+      summary: Checks a staged database file (Electron main process only)
+      description: >
+        The main process copies the file the user chose into the restore-staging
+        folder as staged-NUMBER.db; only such a name is accepted. The file is
+        opened read-only and must pass an integrity check, be a Day Tracker database
+        whose migration history matches this version, and not come from a newer
+        version. Refusals answer RESTORE_REJECTED.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fileName]
+              properties:
+                fileName: { type: string, example: staged-1761400000000.db }
+      responses:
+        '200':
+          description: The file can be restored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoreCheck'
+        '400':
+          description: The file was refused (code RESTORE_REJECTED).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /lifecycle/restore/safety-backup:
+    post:
+      operationId: createSafetyBackup
+      summary: Saves the current data before a restore (Electron main process only)
+      responses:
+        '201':
+          description: The safety backup was written and checked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupInfo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          description: The backup could not be written (code BACKUP_FAILED).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  securitySchemes:
+    launchToken:
+      type: http
+      scheme: bearer
+      description: Random token generated by Electron for each launch.
+  responses:
+    Unauthorized:
+      description: Missing or invalid launch credentials.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InvalidRequest:
+      description: The request is malformed or contains invalid fields.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: No record has this id.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    CoverSourceUnavailable:
+      description: Open Library could not be reached or answered unusably (code COVER_SOURCE_UNAVAILABLE).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: A stale version, or a state that conflicts with existing data.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    Health:
+      type: object
+      required: [status, apiVersion]
+      properties:
+        status: { type: string, enum: [READY] }
+        apiVersion: { type: string, example: v1 }
+    TaskStatus:
+      type: string
+      enum: [PENDING, IN_PROGRESS, DONE]
+    TaskPriority:
+      type: string
+      enum: [LOW, MEDIUM, HIGH]
+    CreateTaskRequest:
+      type: object
+      required: [id, title]
+      properties:
+        id: { type: string, format: uuid }
+        title:
+          type: string
+          description: Trimmed by the server; 1 to 200 characters after trimming.
+        description: { type: string, nullable: true, maxLength: 5000 }
+        categoryId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Must be an existing, non-archived category.
+        priority:
+          allOf: [{ $ref: '#/components/schemas/TaskPriority' }]
+          default: MEDIUM
+        plannedDate: { type: string, format: date, nullable: true }
+        deadlineDate: { type: string, format: date, nullable: true }
+    Task:
+      type: object
+      required:
+        [id, title, description, categoryId, priority, status, plannedDate, deadlineDate,
+         completedAt, archivedAt, createdAt, updatedAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        description: { type: string, nullable: true }
+        categoryId: { type: string, format: uuid, nullable: true }
+        priority: { $ref: '#/components/schemas/TaskPriority' }
+        status: { $ref: '#/components/schemas/TaskStatus' }
+        plannedDate: { type: string, format: date, nullable: true }
+        deadlineDate: { type: string, format: date, nullable: true }
+        completedAt: { type: string, format: date-time, nullable: true }
+        archivedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+    UpdateTaskRequest:
+      type: object
+      required: [version]
+      properties:
+        version: { type: integer, minimum: 1, description: The version last read. }
+        title: { type: string }
+        description: { type: string, nullable: true, maxLength: 5000 }
+        categoryId: { type: string, format: uuid, nullable: true }
+        priority: { $ref: '#/components/schemas/TaskPriority' }
+        status: { $ref: '#/components/schemas/TaskStatus' }
+        plannedDate: { type: string, format: date, nullable: true }
+        deadlineDate: { type: string, format: date, nullable: true }
+        archived: { type: boolean }
+    TaskActivity:
+      type: object
+      required: [action, previousStatus, newStatus, previousPlannedDate, newPlannedDate, occurredAt]
+      properties:
+        action:
+          type: string
+          enum: [CREATED, COMPLETED, REOPENED, STATUS_CHANGED, RESCHEDULED, ARCHIVED, RESTORED, EDITED]
+        previousStatus: { allOf: [{ $ref: '#/components/schemas/TaskStatus' }], nullable: true }
+        newStatus: { allOf: [{ $ref: '#/components/schemas/TaskStatus' }], nullable: true }
+        previousPlannedDate: { type: string, format: date, nullable: true }
+        newPlannedDate: { type: string, format: date, nullable: true }
+        occurredAt: { type: string, format: date-time }
+    Category:
+      type: object
+      required: [id, name, color, archivedAt, createdAt, updatedAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        color: { type: string, example: '#668BE8' }
+        archivedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+    Progress:
+      type: object
+      required:
+        [from, to, today, tasksCompleted, tasksPlanned, pagesRead, readingDays, elapsedDays,
+         consistencyPercent, targetPercent, days, completedTasks, books]
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        today: { type: string, format: date, description: Today in the configured timezone. }
+        tasksCompleted: { type: integer }
+        tasksPlanned:
+          type: integer
+          description: Tasks planned on a date in the interval, finished or not; archived ones are left out.
+        pagesRead: { type: integer }
+        readingDays: { type: integer }
+        elapsedDays:
+          type: integer
+          description: Days of the interval up to and including today.
+        consistencyPercent:
+          type: integer
+          nullable: true
+          description: Reading days over elapsed days; null when no day has begun.
+        targetPercent:
+          type: integer
+          nullable: true
+          description: >
+            Pages read over the targets of the elapsed days, not capped; null when no
+            day has begun.
+        days:
+          type: array
+          items:
+            type: object
+            required: [date, tasksCompleted, pagesRead, targetPages, targetPercent, future]
+            properties:
+              date: { type: string, format: date }
+              tasksCompleted: { type: integer }
+              pagesRead: { type: integer }
+              targetPages: { type: integer }
+              targetPercent:
+                type: integer
+                nullable: true
+                description: Not capped; null for a day after today.
+              future: { type: boolean }
+        completedTasks:
+          type: array
+          description: The tasks behind tasksCompleted, oldest first, at most 500.
+          items: { $ref: '#/components/schemas/Task' }
+        books:
+          type: array
+          description: Books read in the interval, with where each stands now.
+          items:
+            type: object
+            required: [bookId, title, coverUpdatedAt, pagesRead, currentPage, totalPages, positionPercent]
+            properties:
+              bookId: { type: string, format: uuid }
+              title: { type: string }
+              coverUpdatedAt: { type: string, format: date-time, nullable: true }
+              pagesRead: { type: integer }
+              currentPage: { type: integer }
+              totalPages: { type: integer }
+              positionPercent: { type: integer }
+    Settings:
+      type: object
+      required: [displayName, timezone, weekStart, timeFormat]
+      properties:
+        displayName: { type: string, maxLength: 60 }
+        timezone: { type: string, example: America/Sao_Paulo, description: An IANA region id. }
+        weekStart: { type: integer, minimum: 0, maximum: 6, description: 0 is Sunday. }
+        timeFormat: { type: string, enum: [H12, H24] }
+    UpdateSettingsRequest:
+      type: object
+      properties:
+        displayName: { type: string, maxLength: 60 }
+        timezone: { type: string }
+        weekStart: { type: integer, minimum: 0, maximum: 6 }
+        timeFormat: { type: string, enum: [H12, H24] }
+    BackupInfo:
+      type: object
+      required: [name, kind, createdAt, sizeBytes, schemaVersion, appVersion, verified]
+      properties:
+        name: { type: string, example: manual-20261025-153012345.db }
+        kind: { type: string, enum: [MANUAL, AUTOMATIC, PRE_MIGRATION, SAFETY] }
+        createdAt: { type: string, format: date-time }
+        sizeBytes: { type: integer }
+        schemaVersion: { type: integer, nullable: true }
+        appVersion: { type: string, nullable: true }
+        verified: { type: boolean }
+    BackupStatus:
+      type: object
+      required: [directory, backups, lastAttempt]
+      properties:
+        directory: { type: string }
+        backups:
+          type: array
+          description: Newest first.
+          items: { $ref: '#/components/schemas/BackupInfo' }
+        lastAttempt:
+          type: object
+          nullable: true
+          required: [kind, ok, at, message, fileName]
+          properties:
+            kind: { type: string, enum: [MANUAL, AUTOMATIC, PRE_MIGRATION, SAFETY] }
+            ok: { type: boolean }
+            at: { type: string, format: date-time }
+            message: { type: string }
+            fileName: { type: string, nullable: true }
+    RestoreCheck:
+      type: object
+      required: [schemaVersion, newestKnownVersion, sizeBytes, counts]
+      properties:
+        schemaVersion: { type: integer }
+        newestKnownVersion: { type: integer }
+        sizeBytes: { type: integer }
+        counts:
+          type: object
+          description: Records in the file, by kind.
+          additionalProperties: { type: integer }
+    TaskPage:
+      type: object
+      required: [items, page, size, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Task' }
+        page: { type: integer }
+        size: { type: integer }
+        total: { type: integer }
+    CalendarItem:
+      type: object
+      description: >
+        An appointment (one EVENT item on every date it overlaps), the reading
+        recorded on a date (one READING item per book read that day, titled with the
+        book and carrying its bookId and cover), or a planned task, listed in that
+        order within a date. Fields that do not apply to a type are null.
+      required:
+        [type, id, date, title, status, priority, pagesRead, allDay, startsAt, endsAt, continued, overlapsAnother,
+         bookId, coverUpdatedAt]
+      properties:
+        type: { type: string, enum: [EVENT, READING, TASK] }
+        id: { type: string, description: 'The event or task id, or reading-YYYY-MM-DD-<bookId>.' }
+        date: { type: string, format: date }
+        title: { type: string }
+        status: { allOf: [{ $ref: '#/components/schemas/TaskStatus' }], nullable: true }
+        priority: { allOf: [{ $ref: '#/components/schemas/TaskPriority' }], nullable: true }
+        pagesRead: { type: integer, nullable: true }
+        allDay: { type: boolean, nullable: true }
+        startsAt: { type: string, format: date-time, nullable: true }
+        endsAt: { type: string, format: date-time, nullable: true }
+        continued: { type: boolean, nullable: true, description: The event began on an earlier date. }
+        overlapsAnother: { type: boolean, nullable: true }
+        bookId: { type: string, format: uuid, nullable: true, description: READING only. }
+        coverUpdatedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: READING only. When the book's cover last changed; null without a cover.
+    Event:
+      type: object
+      required:
+        [id, title, notes, categoryId, allDay, startsAt, endsAt, timezone, localStart, localEnd, startDate,
+         endDateExclusive, overlapsAnother, createdAt, updatedAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        notes: { type: string, nullable: true }
+        categoryId: { type: string, format: uuid, nullable: true }
+        allDay: { type: boolean }
+        startsAt: { type: string, format: date-time, nullable: true }
+        endsAt: { type: string, format: date-time, nullable: true }
+        timezone: { type: string, nullable: true }
+        localStart: { type: string, nullable: true, description: Wall-clock start in timezone. }
+        localEnd: { type: string, nullable: true }
+        startDate: { type: string, format: date, nullable: true }
+        endDateExclusive: { type: string, format: date, nullable: true }
+        overlapsAnother:
+          type: boolean
+          description: True when a timed event overlaps another timed event. Overlaps are allowed.
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+    DailyReview:
+      type: object
+      required: [id, reviewDate, wins, obstacles, tomorrowPriority, createdAt, updatedAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        reviewDate: { type: string, format: date }
+        wins: { type: string }
+        obstacles: { type: string }
+        tomorrowPriority: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+    BookStatus:
+      type: string
+      enum: [TO_READ, READING, FINISHED, ABANDONED]
+    Book:
+      type: object
+      required:
+        [id, title, author, totalPages, initialPage, status, archivedAt, createdAt, updatedAt, version,
+         currentPage, pagesReadTotal, coverUpdatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        author: { type: string, nullable: true }
+        totalPages: { type: integer, minimum: 1 }
+        initialPage: { type: integer, minimum: 0 }
+        status: { $ref: '#/components/schemas/BookStatus' }
+        archivedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+        currentPage:
+          type: integer
+          description: >
+            Derived position: the ending page of the latest dated non-deleted
+            session that recorded one (creation time, then id, break ties),
+            otherwise initialPage.
+        pagesReadTotal:
+          type: integer
+          description: Derived effort, the sum of pagesRead over non-deleted sessions.
+        coverUpdatedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the cover image last changed; null when the book has no cover.
+    BookSuggestion:
+      type: object
+      required: [title, author, publisher, firstPublishYear, totalPages, coverId]
+      properties:
+        title: { type: string }
+        author: { type: string, nullable: true }
+        publisher:
+          type: string
+          nullable: true
+          description: Set only for known technical publishers, such as O'Reilly, Manning, or Packt.
+        firstPublishYear: { type: integer, nullable: true }
+        totalPages: { type: integer, nullable: true, description: Median page count across editions. }
+        coverSource: { allOf: [{ $ref: '#/components/schemas/CoverSource' }], nullable: true }
+        coverId: { type: string, nullable: true, description: 'Open Library cover id, or an ISBN for GOOGLE_BOOKS.' }
+    CoverSource:
+      type: string
+      enum: [OPEN_LIBRARY, GOOGLE_BOOKS]
+      description: >
+        GOOGLE_BOOKS is offered only when Open Library has no cover for a work;
+        its covers are looked up by ISBN and must be confirmed by the user.
+    CoverCandidate:
+      type: object
+      required: [source, sourceId, title, author, firstPublishYear]
+      properties:
+        source: { $ref: '#/components/schemas/CoverSource' }
+        sourceId: { type: string, description: 'Open Library cover id, or an ISBN for GOOGLE_BOOKS.' }
+        title: { type: string }
+        author: { type: string, nullable: true }
+        firstPublishYear: { type: integer, nullable: true }
+    ReadingSession:
+      type: object
+      required: [id, bookId, bookTitle, activityDate, pagesRead, endingPage, notes, createdAt, updatedAt, version]
+      properties:
+        id: { type: string, format: uuid }
+        bookId: { type: string, format: uuid }
+        bookTitle: { type: string }
+        activityDate: { type: string, format: date }
+        pagesRead: { type: integer, minimum: 1 }
+        endingPage: { type: integer, minimum: 0, nullable: true }
+        notes: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        version: { type: integer, minimum: 1 }
+    ReadingGoal:
+      type: object
+      required: [effectiveDate, targetPages, updatedAt]
+      properties:
+        effectiveDate: { type: string, format: date }
+        targetPages: { type: integer, minimum: 1 }
+        updatedAt: { type: string, format: date-time }
+    EffectiveReadingGoal:
+      type: object
+      required: [targetPages, effectiveDate]
+      properties:
+        targetPages: { type: integer }
+        effectiveDate:
+          type: string
+          format: date
+          nullable: true
+          description: Null while the built-in default of 30 pages applies.
+    CalendarRange:
+      type: object
+      required: [from, to, items]
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/CalendarItem' }
+    Day:
+      type: object
+      required: [date, tasks, carryOver, readingSessions, pagesRead, readingGoal, events, review]
+      properties:
+        date: { type: string, format: date }
+        tasks:
+          type: array
+          items: { $ref: '#/components/schemas/Task' }
+        carryOver:
+          type: array
+          description: >
+            Unfinished, non-archived tasks planned before this date and before
+            today, oldest first (at most 100). They are never rescheduled automatically.
+          items: { $ref: '#/components/schemas/Task' }
+        readingSessions:
+          type: array
+          description: Non-deleted sessions dated on this day, in the order recorded.
+          items: { $ref: '#/components/schemas/ReadingSession' }
+        pagesRead: { type: integer, description: Sum of pagesRead in those sessions. }
+        readingGoal: { $ref: '#/components/schemas/EffectiveReadingGoal' }
+        events:
+          type: array
+          description: Appointments overlapping this date, all-day first, then by start.
+          items: { $ref: '#/components/schemas/Event' }
+        review:
+          allOf: [{ $ref: '#/components/schemas/DailyReview' }]
+          nullable: true
+    Error:
+      type: object
+      required: [code, message, correlationId]
+      properties:
+        code: { type: string, example: VALIDATION_FAILED }
+        message: { type: string }
+        fieldErrors:
+          type: array
+          items:
+            type: object
+            required: [field, message]
+            properties:
+              field: { type: string }
+              message: { type: string }
+        correlationId: { type: string }

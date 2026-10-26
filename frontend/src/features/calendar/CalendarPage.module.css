@@ -1,0 +1,93 @@
+.page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(264px, 24vw, 360px);
+  height: 100%;
+  min-height: 0;
+}
+
+.center {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: 0;
+  padding: var(--space-4);
+  overflow-y: auto;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+}
+
+.group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.group > button {
+  padding-inline: var(--space-4);
+}
+
+.title {
+  flex: 1;
+  font-size: 1.35rem;
+  white-space: nowrap;
+}
+
+.segmented {
+  display: flex;
+  padding: 2px;
+  background: var(--color-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+}
+
+.segment {
+  padding: var(--space-1) var(--space-4);
+  background: none;
+  border: none;
+  border-radius: 999px;
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.segment[aria-pressed='true'] {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.error {
+  color: var(--color-danger);
+}
+
+@media (max-height: 800px) {
+  .center {
+    gap: var(--space-2);
+    padding: var(--space-3);
+  }
+}
+
+/* Narrow or heavily scaled windows: the selected day moves below the calendar. */
+@media (max-width: 1040px) {
+  .page {
+    display: block;
+    overflow-y: auto;
+  }
+
+  .center {
+    min-height: auto;
+    overflow-y: visible;
+  }
+
+  .page > aside {
+    border-left: none;
+    border-top: 1px solid var(--color-border);
+    overflow-y: visible;
+  }
+}

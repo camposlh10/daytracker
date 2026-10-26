@@ -1,0 +1,35 @@
+/* Shared theme tokens: soft dark surfaces with a blue accent. */
+:root {
+  --color-app-bg: #20242c;
+  --color-sidebar: #252a33;
+  --color-surface: #2b303b;
+  --color-elevated: #323947;
+  --color-border: #404855;
+  /* The edge of a text field or selector: 3:1 against the surfaces it sits on (WCAG 1.4.11). */
+  --color-border-strong: #7b8596;
+  --color-text: #edf0f5;
+  --color-text-secondary: #b4bdca;
+  --color-primary: #668be8;
+  --color-primary-hover: #8aa7f0;
+  /* White on the primary blue is only about 3.3:1; this dark text is above 5:1. */
+  --color-on-primary: #14171c;
+  --color-danger: #f0958e;
+  --color-success: #7fd1a0;
+  --color-warning: #e9c46a;
+  --color-reading: #c9a6f0;
+  --color-event: #7fc8e8;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  --font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  --focus-ring: 0 0 0 2px var(--color-app-bg), 0 0 0 4px var(--color-primary);
+}
