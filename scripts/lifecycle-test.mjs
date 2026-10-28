@@ -192,6 +192,52 @@ backend.waitUntilSettled(60000).then((state) => { console.log('STATE ' + state.s
     check(a.ok && listTwo.ok && listTwo.data.total === 0, 'their data is separate');
   }
 
+  console.log('8. Using a server instead of starting one');
+  {
+    // A backend started on its own, the way a server (for example on Railway) runs it.
+    const token = 'server-access-token-0123456789abcdef0123456789';
+    const server = spawn(javaPath, ['-jar', jarPath], {
+      // The parent watch makes it exit when this test closes its input, even through a java launcher.
+      env: { ...process.env, DAYTRACKER_TOKEN: token, DAYTRACKER_DATA_DIR: newDataDir(), DAYTRACKER_PARENT_WATCH: 'true' },
+      stdio: ['pipe', 'pipe', 'ignore'],
+    });
+    try {
+      const port = await new Promise((resolve, reject) => {
+        let text = '';
+        server.stdout.on('data', (chunk) => {
+          text += chunk;
+          const match = /DAYTRACKER_READY \{"port":(\d+)\}/.exec(text);
+          if (match) resolve(Number(match[1]));
+        });
+        setTimeout(() => reject(new Error('The standalone backend did not start.')), 60_000);
+      });
+      const baseUrl = `http://127.0.0.1:${port}`;
+
+      const remote = manager({ dataDir: newDataDir(), remote: { baseUrl, token } });
+      remote.start();
+      const state = await remote.waitUntilSettled(15_000);
+      check(state.status === 'ready' && remote.isRemote() && remote.child === null, 'the app connects to the server and starts no process of its own');
+      const id = randomUUID();
+      const saved = await remote.request('POST', '/api/v1/tasks', { id, title: 'Saved on the server' });
+      const listed = await remote.request('GET', '/api/v1/tasks');
+      check(saved.ok && listed.ok && listed.data.items.some((task) => task.id === id), 'data is saved on and read from the server');
+
+      const wrong = manager({ dataDir: newDataDir(), remote: { baseUrl, token: 'not-the-right-token-0123456789abcdef0123' } });
+      wrong.start();
+      const refused = await wrong.waitUntilSettled(15_000);
+      check(refused.status === 'failed' && refused.message.includes('refused the access token'), 'a wrong token is reported as such, not as empty data');
+
+      const gone = manager({ dataDir: newDataDir(), remote: { baseUrl: 'http://127.0.0.1:9', token } });
+      gone.start();
+      const unreachable = await gone.waitUntilSettled(30_000);
+      check(unreachable.status === 'failed' && unreachable.message.includes('could not be reached'), 'an unreachable server is reported as such');
+    } finally {
+      server.stdin.end('shutdown\n');
+      await waitUntil(() => server.exitCode !== null, 15_000);
+      if (server.exitCode === null) server.kill();
+    }
+  }
+
   console.log('LIFECYCLE TEST PASSED');
 } catch (error) {
   failed = true;

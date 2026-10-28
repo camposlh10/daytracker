@@ -48,6 +48,7 @@ describe('Music (Spotify)', () => {
     expect(await screen.findByText('http://127.0.0.1:43821/callback')).toBeInTheDocument();
     expect(screen.getByText('http://[::1]:43821/callback')).toBeInTheDocument();
     expect(screen.getByText('daytracker://spotify-callback')).toBeInTheDocument();
+    expect(screen.getByText('https://your-server.up.railway.app/spotify/callback')).toBeInTheDocument();
     expect(screen.getByText(/User Management/)).toBeInTheDocument();
     expect(screen.getByLabelText('Redirect URI')).toHaveValue('http://127.0.0.1:43821/callback');
     await user.type(screen.getByLabelText('Client ID'), CLIENT_ID);

@@ -3,12 +3,13 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { BackendManager } from './backend';
-import type { ExportDataset } from './shared/bridge-types';
+import type { ApiResult, ExportDataset } from './shared/bridge-types';
 import { chooseCoverFile, handleCoverScheme, registerCoverScheme } from './covers';
 import { exportCsv, openBackupFolder, saveBackupCopy } from './dataTools';
 import { registerIpc } from './ipc';
 import { restoreFromBackup } from './restore';
 import { recoverInterruptedRestore } from './restoreSwap';
+import { describeServer, loadServer, normalizeServerUrl, saveServer, testServer, validToken } from './serverConfig';
 import { createSpotify, handleSpotifyImageScheme } from './spotify';
 
 const DEV_SERVER_URL = 'http://127.0.0.1:5173/';
@@ -155,19 +156,29 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
 
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
     if (!isDev) {
       Menu.setApplicationMenu(null);
     }
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
 
     const dataDir = path.join(app.getPath('userData'), 'data');
+    // The user's own server, when one was chosen in Settings; otherwise a local data service.
+    const remote = await loadServer(app.getPath('userData'));
     const manager = new BackendManager({
       ...resolveBackendPaths(),
       dataDir,
       startupTimeoutMs: STARTUP_TIMEOUT_MS,
       cacheDir: isDev ? undefined : path.join(dataDir, 'cache'),
+      remote: remote ?? undefined,
     });
+    const onServer = <T,>(local: () => Promise<T>) => (): Promise<T | ApiResult<never>> =>
+      remote
+        ? Promise.resolve({
+            ok: false,
+            error: { status: 400, code: 'NOT_ON_SERVER', message: 'This works only when your data is on this computer.' },
+          })
+        : local();
     backend = manager;
     manager.on('state', (state) => mainWindow?.webContents.send('backend:state', state));
 
@@ -190,15 +201,54 @@ if (!app.requestSingleInstanceLock()) {
       chooseCoverFile: (bookId) => chooseCoverFile(mainWindow, manager, bookId),
       exportCsv: (dataset, range) =>
         exportCsv({ window: mainWindow, backend: manager, dataDir }, dataset as ExportDataset, range),
-      saveBackupCopy: (name) => saveBackupCopy({ window: mainWindow, backend: manager, dataDir }, name),
-      openBackupFolder: () => openBackupFolder(dataDir),
-      restoreBackup: () => restoreFromBackup({ window: mainWindow, backend: manager, dataDir }),
+      saveBackupCopy: (name) => onServer(() => saveBackupCopy({ window: mainWindow, backend: manager, dataDir }, name))(),
+      openBackupFolder: async () => {
+        if (!remote) {
+          await openBackupFolder(dataDir);
+        }
+      },
+      restoreBackup: onServer(() => restoreFromBackup({ window: mainWindow, backend: manager, dataDir })),
       spotify,
+      server: {
+        describe: () => describeServer(app.getPath('userData'), remote),
+        test: (url, token) => {
+          const baseUrl = normalizeServerUrl(url);
+          if (!baseUrl) {
+            return Promise.resolve(invalidServer());
+          }
+          if (!validToken(token)) {
+            return Promise.resolve(invalidToken());
+          }
+          return testServer(baseUrl, token);
+        },
+        // The new choice takes effect on a restart, so nothing half-switched is ever shown.
+        use: async (choice) => {
+          if (choice === null) {
+            await saveServer(app.getPath('userData'), null);
+          } else {
+            const baseUrl = normalizeServerUrl(choice.url);
+            if (!baseUrl) {
+              return invalidServer();
+            }
+            if (!validToken(choice.token)) {
+              return invalidToken();
+            }
+            const check = await testServer(baseUrl, choice.token);
+            if (!check.ok) {
+              return check;
+            }
+            await saveServer(app.getPath('userData'), { baseUrl, token: choice.token });
+          }
+          app.relaunch();
+          app.quit();
+          return { ok: true, data: null };
+        },
+      },
     });
 
     createWindow();
     // A restore cut short by a crash is undone before the data service opens the database.
-    void recoverInterruptedRestore(dataDir)
+    void (remote ? Promise.resolve(null) : recoverInterruptedRestore(dataDir))
       .catch(() => null)
       .then((undone) => {
         manager.start();
@@ -207,4 +257,26 @@ if (!app.requestSingleInstanceLock()) {
         }
       });
   });
+}
+
+function invalidServer(): ApiResult<never> {
+  return {
+    ok: false,
+    error: {
+      status: 400,
+      code: 'VALIDATION_FAILED',
+      message: 'Enter the server address as https://name.example, without a path (http is allowed only on this computer).',
+    },
+  };
+}
+
+function invalidToken(): ApiResult<never> {
+  return {
+    ok: false,
+    error: {
+      status: 400,
+      code: 'VALIDATION_FAILED',
+      message: 'The access token is the DAYTRACKER_TOKEN the server runs with: at least 32 characters, no spaces.',
+    },
+  };
 }

@@ -82,6 +82,11 @@ const bridge: DayTrackerBridge = {
   exports: {
     save: (dataset, range) => ipcRenderer.invoke('exports:save', dataset, range),
   },
+  server: {
+    describe: () => ipcRenderer.invoke('server:describe'),
+    test: (input) => ipcRenderer.invoke('server:test', input),
+    use: (input) => ipcRenderer.invoke('server:use', input),
+  },
   spotify: {
     status: () => ipcRenderer.invoke('spotify:status'),
     configure: (input) => ipcRenderer.invoke('spotify:configure', input),

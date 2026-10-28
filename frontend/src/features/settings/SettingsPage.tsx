@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import {
   backupsApi,
   calendarApi,
@@ -6,8 +6,16 @@ import {
   exportsApi,
   isCancelled,
   readingGoalsApi,
+  serverApi,
 } from '../../api/client';
-import type { AppSettings, BackupInfo, BackupKind, ExportDataset, UpdateSettingsInput } from '../../api/bridge';
+import type {
+  AppSettings,
+  BackupInfo,
+  BackupKind,
+  ExportDataset,
+  ServerConnection,
+  UpdateSettingsInput,
+} from '../../api/bridge';
 import { useLoadable } from '../../app/useLoadable';
 import { Button } from '../../components/Button';
 import { LoadingState } from '../../components/States';
@@ -65,6 +73,11 @@ function NoticeLine({ notice }: { notice: Notice }) {
 }
 
 export function SettingsPage({ settings, today, backendReady, onSave, onDataChanged, onRestored }: SettingsPageProps) {
+  const [connection, setConnection] = useState<ServerConnection | null>(null);
+  useEffect(() => {
+    serverApi.describe().then(setConnection, () => setConnection(null));
+  }, []);
+  const onServer = connection?.activeUrl != null;
   return (
     <div className={styles.page}>
       <header>
@@ -76,7 +89,8 @@ export function SettingsPage({ settings, today, backendReady, onSave, onDataChan
         <ProfileSection settings={settings} backendReady={backendReady} onSave={onSave} onSaved={onDataChanged} />
       )}
       <TargetSection today={today} backendReady={backendReady} onDataChanged={onDataChanged} />
-      <BackupSection backendReady={backendReady} onRestored={onRestored} />
+      <ServerSection connection={connection} />
+      <BackupSection backendReady={backendReady} onRestored={onRestored} onServer={onServer} />
       <ExportSection today={today} backendReady={backendReady} />
     </div>
   );
@@ -264,7 +278,15 @@ function TargetSection({
   );
 }
 
-function BackupSection({ backendReady, onRestored }: { backendReady: boolean; onRestored?: () => void }) {
+function BackupSection({
+  backendReady,
+  onRestored,
+  onServer,
+}: {
+  backendReady: boolean;
+  onRestored?: () => void;
+  onServer: boolean;
+}) {
   const [changes, setChanges] = useState(0);
   const [busy, setBusy] = useState<'backup' | 'restore' | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
@@ -315,11 +337,21 @@ function BackupSection({ backendReady, onRestored }: { backendReady: boolean; on
         <Button variant="primary" disabled={busy !== null || !backendReady} onClick={() => void backUp()}>
           {busy === 'backup' ? 'Backing up…' : 'Back up now'}
         </Button>
-        <Button onClick={() => void backupsApi.openFolder()}>Open backup folder</Button>
-        <Button disabled={busy !== null || !backendReady} onClick={() => void restore()}>
-          {busy === 'restore' ? 'Restoring…' : 'Restore from a file…'}
-        </Button>
+        {!onServer && (
+          <>
+            <Button onClick={() => void backupsApi.openFolder()}>Open backup folder</Button>
+            <Button disabled={busy !== null || !backendReady} onClick={() => void restore()}>
+              {busy === 'restore' ? 'Restoring…' : 'Restore from a file…'}
+            </Button>
+          </>
+        )}
       </div>
+      {onServer && (
+        <p className={styles.muted}>
+          Your data is on your server, so its backups are kept there. Restoring and copying backup files work only for
+          data on this computer.
+        </p>
+      )}
       <NoticeLine notice={notice} />
       {last && !last.ok && (
         <p className={form.error} role="alert">
@@ -350,9 +382,11 @@ function BackupSection({ backendReady, onRestored }: { backendReady: boolean; on
                     {!backup.verified && <span className={styles.warning}> · not checked</span>}
                     <div className={styles.muted}>{backup.name}</div>
                   </div>
-                  <Button disabled={busy !== null} onClick={() => void copy(backup)}>
-                    Save a copy…
-                  </Button>
+                  {!onServer && (
+                    <Button disabled={busy !== null} onClick={() => void copy(backup)}>
+                      Save a copy…
+                    </Button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -405,6 +439,128 @@ function ExportSection({ today, backendReady }: { today: IsoDate; backendReady: 
         </Button>
       </div>
       <NoticeLine notice={notice} />
+    </section>
+  );
+}
+
+/**
+ * Where the data lives: this computer, or the user's own Day Tracker server (for
+ * example one deployed on Railway). Switching checks the server and restarts the app.
+ */
+function ServerSection({ connection }: { connection: ServerConnection | null }) {
+  const [url, setUrl] = useState('');
+  const [token, setToken] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<Notice>(null);
+
+  useEffect(() => {
+    if (connection?.activeUrl) setUrl(connection.activeUrl);
+  }, [connection?.activeUrl]);
+
+  const attempt = async (action: () => Promise<string>) => {
+    setBusy(true);
+    setNotice(null);
+    try {
+      setNotice({ kind: 'ok', text: await action() });
+    } catch (failure) {
+      setNotice({ kind: 'error', text: errorMessage(failure) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const test = () =>
+    attempt(async () => {
+      const result = await serverApi.test(url, token);
+      return `The server answered and accepted the token (API ${result.apiVersion}).`;
+    });
+
+  const use = (event: FormEvent) => {
+    event.preventDefault();
+    void attempt(async () => {
+      await serverApi.use({ url, token });
+      return 'Restarting with your server…';
+    });
+  };
+
+  const active = connection?.activeUrl ?? null;
+
+  return (
+    <section className={styles.section} aria-labelledby="settings-server">
+      <h2 id="settings-server">Where your data lives</h2>
+      <p>
+        {active ? (
+          <>
+            On your server: <code>{active}</code>
+          </>
+        ) : (
+          'On this computer.'
+        )}
+      </p>
+      <p className={styles.muted}>
+        Instead of this computer, Day Tracker can use your own Day Tracker server, such as one you deployed on
+        Railway. Enter its https address and the access token it runs with (its DAYTRACKER_TOKEN). The token is kept
+        encrypted for your Windows user. Switching restarts the app; data is not copied between the two places.
+      </p>
+      {connection && !connection.canEncrypt ? (
+        <p className={form.error} role="alert">
+          Windows cannot encrypt the token on this computer, so a server cannot be saved.
+        </p>
+      ) : (
+        <form className={styles.form} onSubmit={use}>
+          <div className={styles.row}>
+            <div className={form.field}>
+              <label className={form.label} htmlFor="server-url">
+                Server address
+              </label>
+              <input
+                id="server-url"
+                className={form.control}
+                placeholder="https://your-app.up.railway.app"
+                value={url}
+                spellCheck={false}
+                autoComplete="off"
+                onChange={(event) => setUrl(event.target.value)}
+              />
+            </div>
+            <div className={form.field}>
+              <label className={form.label} htmlFor="server-token">
+                Access token
+              </label>
+              <input
+                id="server-token"
+                type="password"
+                className={form.control}
+                value={token}
+                autoComplete="off"
+                onChange={(event) => setToken(event.target.value)}
+              />
+            </div>
+          </div>
+          <div className={styles.actions}>
+            <Button disabled={busy || !url.trim() || !token} onClick={() => void test()}>
+              Test connection
+            </Button>
+            <Button type="submit" variant="primary" disabled={busy || !url.trim() || !token}>
+              {active ? 'Save and restart' : 'Use this server'}
+            </Button>
+            {active && (
+              <Button
+                disabled={busy}
+                onClick={() =>
+                  void attempt(async () => {
+                    await serverApi.use(null);
+                    return 'Restarting with the data on this computer…';
+                  })
+                }
+              >
+                Use this computer instead
+              </Button>
+            )}
+          </div>
+          <NoticeLine notice={notice} />
+        </form>
+      )}
     </section>
   );
 }

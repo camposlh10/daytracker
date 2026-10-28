@@ -90,6 +90,11 @@ function Setup({ spotify }: { spotify: SpotifyState }) {
           accepts, so try these in order and keep the first one it saves without saying it is not secure:
           <ul className={styles.options}>
             <li>
+              Your Day Tracker server, if you run one (for example on Railway):{' '}
+              <code>https://your-server.up.railway.app/spotify/callback</code>. It only passes Spotify’s answer back to
+              this computer.
+            </li>
+            <li>
               <code>{DEFAULT_REDIRECT_URI}</code>
             </li>
             <li>

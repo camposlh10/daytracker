@@ -17,6 +17,7 @@ import type {
   DayDetails,
   DayTrackerBridge,
   ExportResult,
+  ServerConnection,
   SpotifyPlayback,
   SpotifyStatus,
   Progress,
@@ -278,6 +279,11 @@ export function installFakeBridge(initial: BackendState = { status: 'ready' }) {
       saveCopy: vi.fn(),
       openFolder: vi.fn(async () => undefined),
       restore: vi.fn(),
+    },
+    server: {
+      describe: vi.fn(async (): Promise<ServerConnection> => ({ activeUrl: null, savedUrl: null, canEncrypt: true })),
+      test: vi.fn(async (): Promise<ApiResult<{ apiVersion: string }>> => ({ ok: true, data: { apiVersion: 'v1' } })),
+      use: vi.fn(async (): Promise<ApiResult<null>> => ({ ok: true, data: null })),
     },
     spotify: {
       status: vi.fn(

@@ -20,6 +20,7 @@ import {
   type ReadingSession,
   type ReadingSessionPage,
   type ReadingSessionQuery,
+  type ServerConnection,
   type SpotifyDevice,
   type SpotifyPlayback,
   type SpotifyPlayInput,
@@ -163,6 +164,13 @@ export const backupsApi = {
   saveCopy: (name: string): Promise<{ fileName: string }> => unwrap(bridge().backups.saveCopy(name)),
   openFolder: (): Promise<void> => bridge().backups.openFolder(),
   restore: (): Promise<RestoreResult> => unwrap(bridge().backups.restore()),
+};
+
+export const serverApi = {
+  describe: (): Promise<ServerConnection> => bridge().server.describe(),
+  test: (url: string, token: string): Promise<{ apiVersion: string }> => unwrap(bridge().server.test({ url, token })),
+  /** Restarts the app when it succeeds. */
+  use: (choice: { url: string; token: string } | null): Promise<null> => unwrap(bridge().server.use(choice)),
 };
 
 export const exportsApi = {

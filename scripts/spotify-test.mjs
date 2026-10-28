@@ -150,7 +150,12 @@ const client = new SpotifyClient({
       const answer = await fetch(url, { redirect: 'manual' });
       const location = answer.headers.get('location');
       if (!location) return;
-      if (location.startsWith('http')) await fetch(location);
+      if (location.startsWith('https://day-tracker.example/spotify/callback')) {
+        // What the server's relay page does: back to this computer, on the port in the state.
+        const answer = new URL(location);
+        const port = answer.searchParams.get('state').split('.')[1];
+        await fetch(`http://127.0.0.1:${port}/callback?${answer.searchParams}`);
+      } else if (location.startsWith('http')) await fetch(location);
       else client.handleLink(location);
     })().catch(() => undefined);
   },
@@ -172,7 +177,7 @@ try {
   check(!notConfigured.ok && notConfigured.error.code === 'SPOTIFY_NOT_CONFIGURED', 'connecting needs a Client ID first');
   const badId = await client.configure('not-a-client-id', 'http://127.0.0.1/callback');
   check(!badId.ok && badId.error.status === 400, 'a malformed Client ID is refused');
-  for (const uri of ['https://example.com/callback', 'http://localhost:8080/callback', 'http://192.168.1.2:80/cb', 'javascript://alert(1)', 'spotify://x', 'http://127.0.0.1:99999/cb']) {
+  for (const uri of ['https://example.com/callback?next=1', 'http://example.com/callback', 'http://localhost:8080/callback', 'http://192.168.1.2:80/cb', 'javascript://alert(1)', 'spotify://x', 'http://127.0.0.1:99999/cb']) {
     const refused = await client.configure(CLIENT_ID, uri);
     check(!refused.ok && refused.error.status === 400, `a redirect the app cannot receive is refused: ${uri}`);
   }
@@ -264,6 +269,14 @@ try {
   check(client.handleLink('daytracker://spotify-callback?code=x&state=forged') === false, 'a link that arrives when no sign-in is waiting is ignored');
   const viaLink = await client.connect();
   check(viaLink.ok && viaLink.data.connected && fake.lastAuthorize.get('redirect_uri') === 'daytracker://spotify-callback', 'sign-in completes through the app link');
+  await client.configure(CLIENT_ID, 'https://day-tracker.example/spotify/callback');
+  const viaRelay = await client.connect();
+  check(viaRelay.ok && viaRelay.data.connected, 'sign-in completes through the relay on your own server');
+  check(
+    fake.lastAuthorize.get('redirect_uri') === 'https://day-tracker.example/spotify/callback' &&
+      /^[A-Za-z0-9_-]{22}[.][0-9]{4,5}$/.test(fake.lastAuthorize.get('state')),
+    'the https address is sent as registered, and the state carries the local port for the relay',
+  );
   const blocker = createServer(() => undefined);
   await new Promise((resolve) => blocker.listen(43898, '127.0.0.1', resolve));
   await client.configure(CLIENT_ID, 'http://127.0.0.1:43898/callback');

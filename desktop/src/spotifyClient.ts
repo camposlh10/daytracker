@@ -22,7 +22,9 @@ import type {
  * exchanged for tokens. The redirect URI is the user's choice, because Spotify's
  * dashboard has changed which forms it accepts: a loopback address answered by a
  * one-time listener (http://127.0.0.1:PORT/path or http://[::1]:PORT/path, the port
- * optional), or an app link (daytracker://path) that Windows hands to this app.
+ * optional), an app link (daytracker://path) that Windows hands to this app, or an
+ * https address of the user's own Day Tracker server, whose /spotify/callback page
+ * passes the answer on to the loopback listener (the port rides in the state).
  * Only the refresh token is kept, encrypted by the store.
  *
  * Playback is Spotify Connect: it starts, pauses, and skips on one of the user's
@@ -41,9 +43,12 @@ export const DEFAULT_REDIRECT_URI = 'http://127.0.0.1:43821/callback';
 
 export type Redirect =
   | { kind: 'loopback'; host: '127.0.0.1' | '::1'; port: number; path: string; uri: string }
-  | { kind: 'scheme'; scheme: string; uri: string };
+  | { kind: 'scheme'; scheme: string; uri: string }
+  | { kind: 'relay'; uri: string };
 
 const LOOPBACK = /^http:\/\/(127\.0\.0\.1|\[::1\])(?::(\d{1,5}))?(\/[A-Za-z0-9._~\/-]*)?$/;
+// The user's own server, which relays the answer to this computer (see SpotifyRelayController).
+const RELAY = /^https:\/\/[A-Za-z0-9.-]+(:\d{1,5})?\/[A-Za-z0-9._~\/-]*$/;
 const APP_LINK = /^([a-z][a-z0-9+.-]{2,40}):\/\/[A-Za-z0-9._~\/-]*$/;
 // Schemes that belong to browsers, the system, or Spotify itself.
 const RESERVED_SCHEMES = new Set(['http', 'https', 'file', 'ftp', 'javascript', 'data', 'about', 'blob', 'mailto', 'spotify', 'ms-settings']);
@@ -57,6 +62,9 @@ export function parseRedirect(uri: string): Redirect | null {
       return null;
     }
     return { kind: 'loopback', host: loopback[1] === '[::1]' ? '::1' : '127.0.0.1', port, path: loopback[3] ?? '/', uri };
+  }
+  if (RELAY.test(uri)) {
+    return { kind: 'relay', uri };
   }
   const link = APP_LINK.exec(uri);
   if (link && !RESERVED_SCHEMES.has(link[1])) {
@@ -150,7 +158,7 @@ export class SpotifyClient {
       return fail(
         400,
         'VALIDATION_FAILED',
-        'Use a redirect URI Day Tracker can receive: http://127.0.0.1:PORT/path, http://[::1]:PORT/path, or an app link such as daytracker://callback.',
+        'Use a redirect URI Day Tracker can receive: http://127.0.0.1:PORT/path, http://[::1]:PORT/path, an app link such as daytracker://callback, or your server’s https://…/spotify/callback.',
       );
     }
     if (redirect.kind === 'scheme') {
@@ -226,7 +234,7 @@ export class SpotifyClient {
       if (!redirect) {
         return fail(400, 'SPOTIFY_NOT_CONFIGURED', 'The saved redirect URI cannot be used. Enter it again.');
       }
-      const callback = await this.waitForCallback(state, redirect, async (redirectUri) => {
+      const callback = await this.waitForCallback(state, redirect, async (redirectUri, sentState) => {
         const url = new URL(`${this.accountsBase}/authorize`);
         url.search = new URLSearchParams({
           client_id: stored.clientId!,
@@ -235,7 +243,7 @@ export class SpotifyClient {
           code_challenge_method: 'S256',
           code_challenge: challenge,
           scope: SCOPES,
-          state,
+          state: sentState,
         }).toString();
         await this.options.openBrowser(url.toString());
       });
@@ -371,10 +379,12 @@ export class SpotifyClient {
   private waitForCallback(
     state: string,
     redirect: Redirect,
-    openSignIn: (redirectUri: string) => Promise<void>,
+    openSignIn: (redirectUri: string, sentState: string) => Promise<void>,
   ): Promise<ApiResult<{ code: string; redirectUri: string }>> {
     return new Promise((resolve) => {
       let redirectUri = '';
+      // Through a relay, the state also tells the relay which local port to return to.
+      let expectedState = state;
       let settled = false;
       let close = () => undefined as void;
 
@@ -404,7 +414,7 @@ export class SpotifyClient {
         resolve(result);
       };
       const start = () =>
-        openSignIn(redirectUri).catch(() => finish(fail(500, 'SPOTIFY_LOGIN_FAILED', 'Could not open the Spotify sign-in page.')));
+        openSignIn(redirectUri, expectedState).catch(() => finish(fail(500, 'SPOTIFY_LOGIN_FAILED', 'Could not open the Spotify sign-in page.')));
 
       if (redirect.kind === 'scheme') {
         redirectUri = redirect.uri;
@@ -418,7 +428,8 @@ export class SpotifyClient {
 
       const server = createServer((request, response) => {
         const url = new URL(request.url ?? '/', 'http://127.0.0.1');
-        if (url.pathname !== redirect.path || url.searchParams.get('state') !== state) {
+        const path = redirect.kind === 'loopback' ? redirect.path : '/callback';
+        if (url.pathname !== path || url.searchParams.get('state') !== expectedState) {
           // Not Spotify's answer to this sign-in: ignore it and keep waiting.
           response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Not found');
           return;
@@ -440,11 +451,19 @@ export class SpotifyClient {
             500,
             'SPOTIFY_LOGIN_FAILED',
             error.code === 'EADDRINUSE'
-              ? `Port ${redirect.port} is in use by another program. Choose another port in the redirect URI, here and in the Spotify dashboard.`
+              ? `Port ${redirect.kind === 'loopback' ? redirect.port : ''} is in use by another program. Choose another port in the redirect URI, here and in the Spotify dashboard.`
               : 'Could not wait for Spotify to answer.',
           ),
         ),
       );
+      if (redirect.kind === 'relay') {
+        server.listen(0, '127.0.0.1', () => {
+          redirectUri = redirect.uri;
+          expectedState = `${state}.${(server.address() as AddressInfo).port}`;
+          void start();
+        });
+        return;
+      }
       server.listen(redirect.port, redirect.host, () => {
         // Spotify compares the redirect URI character by character: send the registered
         // one, adding the port only when it was registered without one.

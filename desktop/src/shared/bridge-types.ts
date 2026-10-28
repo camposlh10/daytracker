@@ -492,6 +492,16 @@ export interface RestoreResult {
   counts: Record<string, number>;
 }
 
+/** Where the data lives. Null addresses mean this computer. */
+export interface ServerConnection {
+  /** The server this session uses. */
+  activeUrl: string | null;
+  /** The server chosen for the next start. */
+  savedUrl: string | null;
+  /** False when Windows cannot encrypt the token, so a server cannot be saved. */
+  canEncrypt: boolean;
+}
+
 /** Whether Spotify is set up. The Client ID comes from the user's own app in the Spotify developer dashboard. */
 export interface SpotifyStatus {
   clientId: string | null;
@@ -664,6 +674,17 @@ export interface DayTrackerBridge {
   exports: {
     /** Asks where to save a CSV file; the range applies to summaries only. Code CANCELLED when no place is chosen. */
     save(dataset: ExportDataset, range?: DateRangeQuery): Promise<ApiResult<ExportResult>>;
+  };
+  /**
+   * The user's own Day Tracker server. Choosing one (or going back to this computer)
+   * checks the server, saves the choice, and restarts the app.
+   */
+  server: {
+    describe(): Promise<ServerConnection>;
+    /** Checks the address and access token without saving anything. */
+    test(input: { url: string; token: string }): Promise<ApiResult<{ apiVersion: string }>>;
+    /** null goes back to this computer. The app restarts when this succeeds. */
+    use(input: { url: string; token: string } | null): Promise<ApiResult<null>>;
   };
   /**
    * Spotify Connect: controls playback on the user's own Spotify devices. Needs the

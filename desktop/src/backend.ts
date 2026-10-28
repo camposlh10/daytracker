@@ -24,11 +24,18 @@ export interface BackendOptions {
    * newer, so only the bundled runtime is given one.
    */
   cacheDir?: string;
+  /**
+   * Use the user's own Day Tracker server instead of starting one: no process is
+   * launched, and every request goes to this address with this access token (the
+   * DAYTRACKER_TOKEN the server was started with).
+   */
+  remote?: { baseUrl: string; token: string };
 }
 
 /**
  * Owns the Java child process: launch, readiness, authenticated requests,
  * crash detection, and shutdown. Emits 'state' whenever the lifecycle changes.
+ * With a remote server configured, it only checks and talks to that server.
  */
 export class BackendManager extends EventEmitter {
   private child: ChildProcess | null = null;
@@ -45,7 +52,27 @@ export class BackendManager extends EventEmitter {
     return this.state;
   }
 
+  /** True when the data is on the user's own server rather than this computer. */
+  isRemote(): boolean {
+    return this.options.remote !== undefined;
+  }
+
+  private baseUrl(): string | null {
+    if (this.options.remote) {
+      return this.options.remote.baseUrl;
+    }
+    return this.port === null ? null : `http://127.0.0.1:${this.port}`;
+  }
+
+  private bearer(): string {
+    return this.options.remote ? this.options.remote.token : this.token;
+  }
+
   start(): void {
+    if (this.options.remote) {
+      void this.connectRemote();
+      return;
+    }
     if (this.child) {
       return;
     }
@@ -126,6 +153,25 @@ export class BackendManager extends EventEmitter {
     });
   }
 
+  private async connectRemote(): Promise<void> {
+    this.setState({ status: 'starting' });
+    const health = await this.send('GET', '/api/v1/health');
+    if (health.ok) {
+      this.setState({ status: 'ready' });
+      return;
+    }
+    this.setState({
+      status: 'failed',
+      reason: 'startup',
+      message:
+        health.error.status === 401
+          ? 'Your server refused the access token. Check it in Settings, or switch back to this computer.'
+          : health.error.status === 0
+            ? 'Your server could not be reached. Check the internet connection and that the server is running.'
+            : `Your server answered with an error (${health.error.status}).`,
+    });
+  }
+
   private jvmOptions(): string[] {
     const { cacheDir } = this.options;
     if (!cacheDir) {
@@ -182,12 +228,13 @@ export class BackendManager extends EventEmitter {
 
   /** Fetches an image from a fixed backend route; null when there is none or the backend is down. */
   async fetchImage(path: string): Promise<{ bytes: Uint8Array<ArrayBuffer>; contentType: string } | null> {
-    if (this.state.status !== 'ready' || this.port === null) {
+    const base = this.baseUrl();
+    if (this.state.status !== 'ready' || base === null) {
       return null;
     }
     try {
-      const response = await fetch(`http://127.0.0.1:${this.port}${path}`, {
-        headers: { Authorization: `Bearer ${this.token}` },
+      const response = await fetch(`${base}${path}`, {
+        headers: { Authorization: `Bearer ${this.bearer()}` },
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
       const contentType = response.headers.get('Content-Type') ?? '';
@@ -202,12 +249,13 @@ export class BackendManager extends EventEmitter {
 
   /** Fetches a file download from a fixed backend route. */
   async fetchFile(path: string): Promise<ApiResult<DownloadedFile>> {
-    if (this.state.status !== 'ready' || this.port === null) {
+    const base = this.baseUrl();
+    if (this.state.status !== 'ready' || base === null) {
       return unavailable('The data service is not running.');
     }
     try {
-      const response = await fetch(`http://127.0.0.1:${this.port}${path}`, {
-        headers: { Authorization: `Bearer ${this.token}` },
+      const response = await fetch(`${base}${path}`, {
+        headers: { Authorization: `Bearer ${this.bearer()}` },
         signal: AbortSignal.timeout(EXPORT_TIMEOUT_MS),
       });
       if (!response.ok) {
@@ -228,15 +276,16 @@ export class BackendManager extends EventEmitter {
   }
 
   private async send(method: string, path: string, body?: unknown, rawBody?: Uint8Array<ArrayBuffer>): Promise<ApiResult<unknown>> {
-    if (this.port === null) {
+    const base = this.baseUrl();
+    if (base === null) {
       return unavailable('The data service is not running.');
     }
     try {
       const contentType = rawBody ? 'application/octet-stream' : body === undefined ? null : 'application/json';
-      const response = await fetch(`http://127.0.0.1:${this.port}${path}`, {
+      const response = await fetch(`${base}${path}`, {
         method,
         headers: {
-          Authorization: `Bearer ${this.token}`,
+          Authorization: `Bearer ${this.bearer()}`,
           ...(contentType ? { 'Content-Type': contentType } : {}),
         },
         body: rawBody ?? (body === undefined ? undefined : JSON.stringify(body)),
@@ -254,6 +303,9 @@ export class BackendManager extends EventEmitter {
 
   /** Asks the backend to stop, waits a bounded time, then terminates it. */
   async stop(): Promise<void> {
+    if (this.options.remote) {
+      return;
+    }
     const child = this.child;
     if (!child) {
       return;

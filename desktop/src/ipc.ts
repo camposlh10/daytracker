@@ -30,6 +30,11 @@ export interface IpcContext {
   openBackupFolder(): Promise<void>;
   restoreBackup(): Promise<unknown>;
   spotify: SpotifyClient;
+  server: {
+    describe(): Promise<unknown>;
+    test(url: string, token: string): Promise<unknown>;
+    use(choice: { url: string; token: string } | null): Promise<unknown>;
+  };
 }
 
 class InvalidPayload extends Error {}
@@ -170,6 +175,19 @@ export function registerIpc(context: IpcContext): void {
       range === undefined || range === null ? undefined : exportRange(range),
     ),
   );
+
+  handle('server:describe', () => context.server.describe());
+  handle('server:test', (input) => {
+    const fields = asRecord(input);
+    return context.server.test(parseText(fields.url, 'url', 300), parseText(fields.token, 'token', 512));
+  });
+  handle('server:use', (input) => {
+    if (input === null) {
+      return context.server.use(null);
+    }
+    const fields = asRecord(input);
+    return context.server.use({ url: parseText(fields.url, 'url', 300), token: parseText(fields.token, 'token', 512) });
+  });
 
   const { spotify } = context;
   handle('spotify:status', () => spotify.status());

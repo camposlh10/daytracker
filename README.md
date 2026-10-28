@@ -166,6 +166,12 @@ Spotify only allows this for apps registered by the user, so setup is once:
 2. Add a redirect URI and tick Web API. Spotify's documentation allows loopback `http`
    addresses, but in 2026 its dashboard started refusing some new ones as "not secure".
    Day Tracker can receive any of these; use the first one the dashboard saves:
+   - `https://<your-server>/spotify/callback`, if you deploy the backend somewhere with
+     HTTPS (for example Railway). That public page only sends the browser back to
+     `http://127.0.0.1:<port>/callback` on the same computer, with the port carried in
+     the sign-in state; it stores and logs nothing, and the code it passes on is useless
+     without the PKCE verifier that never leaves the desktop app. Every other route on
+     that server still requires the launch token.
    - `http://127.0.0.1:43821/callback`
    - `http://[::1]:43821/callback`
    - `daytracker://spotify-callback` (an app link: Windows hands it to Day Tracker, and
