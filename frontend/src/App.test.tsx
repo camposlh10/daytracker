@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App } from './App';
 import { formatLongDate, formatMonthTitle, todayIso } from './lib/dates';
@@ -130,8 +130,11 @@ describe('App settings', () => {
 
     render(<App />);
 
-    await screen.findByRole('grid');
-    expect(screen.getAllByRole('columnheader')[0]).toHaveTextContent('Sun');
+    const grid = await screen.findByRole('grid');
+    expect(within(grid).getAllByRole('columnheader')[0]).toHaveTextContent('Sun');
+    // The small month in the sidebar starts on the same day.
+    const mini = screen.getByRole('region', { name: 'Choose a date' });
+    expect(within(mini).getAllByRole('columnheader')[0]).toHaveAttribute('abbr', 'Sun');
   });
 
   it('uses the chosen timezone to decide what today is', async () => {

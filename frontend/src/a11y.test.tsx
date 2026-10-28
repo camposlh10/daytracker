@@ -57,7 +57,20 @@ describe('Accessibility (automated rules)', () => {
     populated();
     const user = userEvent.setup();
     render(<App />);
-    await user.click(await screen.findByRole('button', { name: 'Week' }));
+    await user.click(await screen.findByRole('button', { name: /change the calendar view/ }));
+    await user.click(screen.getByRole('menuitemradio', { name: 'Week' }));
+
+    await expectAccessible();
+  });
+
+  it('the day view and the open view menu have no violations', async () => {
+    populated();
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: /change the calendar view/ }));
+    await user.click(screen.getByRole('menuitemradio', { name: 'Day' }));
+    await user.click(screen.getByRole('button', { name: /change the calendar view/ }));
+    await screen.findByRole('menu');
 
     await expectAccessible();
   });

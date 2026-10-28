@@ -6,8 +6,9 @@ tracking reading, and reviewing progress. It runs offline and stores its data lo
 **Status: Sprint 7 (Release hardening).** This is release 0.1.0; see
 [docs/release-notes.md](docs/release-notes.md) and the recorded results in
 [docs/acceptance-checklist.md](docs/acceptance-checklist.md). In place: the app window with its bundled
-Spring Boot backend and SQLite database, the calendar workspace (month and week
-views, selected-day panel), the full task workflow (create, edit, complete,
+Spring Boot backend and SQLite database, the calendar workspace (day, week and month
+views laid out like a wall planner, with the hours of the day in the day and week
+views, a small month for jumping to a date, and the selected-day panel), the full task workflow (create, edit, complete,
 reopen, archive, categories, filters, carry-over, history, completion totals),
 reading (books, sessions with corrections, a position derived separately from
 pages read, an effective-dated daily target), timed and all-day appointments

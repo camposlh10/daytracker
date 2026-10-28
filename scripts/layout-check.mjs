@@ -83,15 +83,32 @@ async function screenshot(name) {
   writeFileSync(path.join(shots, name), Buffer.from(message.result.data, 'base64'));
 }
 
-// Runs in the page: clicks the visible button with this label.
+// Runs in the page: clicks the visible button with this label (a menu button's caret is ignored).
 const clickButton = (label) =>
   evaluate(`(() => {
     const visible = (el) => el.offsetParent !== null && el.getClientRects().length > 0;
-    const button = [...document.querySelectorAll('button')].find((b) => visible(b) && b.textContent.trim() === ${JSON.stringify(label)});
+    const text = (b) => b.textContent.replace('\u25BE', '').trim();
+    const button = [...document.querySelectorAll('button')].find((b) => visible(b) && text(b) === ${JSON.stringify(label)});
     if (!button) return false;
     button.click();
     return true;
   })()`);
+
+// Runs in the page: picks a calendar view from the view menu.
+const chooseView = (name) =>
+  evaluate(`(() => {
+    const toggle = document.querySelector('button[aria-haspopup=menu][aria-label*="calendar view"]');
+    if (!toggle) return false;
+    toggle.click();
+    return new Promise((resolve) => setTimeout(() => {
+      const item = [...document.querySelectorAll('[role=menuitemradio]')].find((el) => el.textContent.includes(${JSON.stringify(name)}));
+      if (item) item.click();
+      resolve(Boolean(item));
+    }, 100));
+  })()`);
+
+const runStep = (step) => (typeof step === 'string' ? clickButton(step) : chooseView(step.view));
+const stepName = (step) => (typeof step === 'string' ? step : `${step.view} view`);
 
 // Runs in the page: what is cut off, covered or overflowing right now.
 const INSPECT = `(() => {
@@ -123,9 +140,12 @@ const INSPECT = `(() => {
 })()`;
 
 const scenes = [
-  { name: 'calendar-month', steps: [] },
-  { name: 'calendar-week', steps: ['Week'] },
-  { name: 'calendar-add-forms', steps: ['Month', '+ Appointment', '+ Review'] },
+  { name: 'calendar-month', steps: [{ view: 'Month' }] },
+  { name: 'calendar-week', steps: [{ view: 'Week' }] },
+  { name: 'calendar-day', steps: [{ view: 'Day' }] },
+  // The open menu must fit in the window; clicking the button again closes it.
+  { name: 'calendar-create-menu', steps: ['+ Create'], after: ['+ Create'] },
+  { name: 'calendar-add-forms', steps: [{ view: 'Month' }, '+ Appointment', '+ Review'] },
   { name: 'tasks', nav: 'Tasks', steps: [] },
   { name: 'dialog-new-task', nav: 'Tasks', steps: ['+ New task'], dialog: true },
   { name: 'dialog-categories', nav: 'Tasks', steps: ['Categories'], dialog: true },
@@ -172,7 +192,7 @@ try {
       if (scene.nav) await clickButton(scene.nav); else await clickButton('Calendar');
       await sleep(400);
       for (const step of scene.steps) {
-        if (!(await clickButton(step))) console.log(`        (no "${step}" button on this screen; skipped)`);
+        if (!(await runStep(step))) console.log(`        (no "${stepName(step)}" button on this screen; skipped)`);
         await sleep(300);
       }
       await sleep(300);
@@ -182,6 +202,10 @@ try {
       console.log(`${problems.length === 0 ? '  ok ' : ' FAIL'} ${label}${problems.length ? '\n        ' + problems.join('\n        ') : ''}`);
       if (problems.length) failed = true;
       if (scale === SCALES[SCALES.length - 1]) await screenshot(`${scene.name}-150.png`);
+      for (const step of scene.after ?? []) {
+        await runStep(step);
+        await sleep(200);
+      }
       if (scene.dialog) {
         await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); document.querySelector('[role=dialog]')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
         await sleep(300);

@@ -5,8 +5,12 @@ internet connection needed.
 
 ## What is in it
 
-- **Calendar** in month and week views, with a day panel for the selected date:
-  tasks, reading, appointments, and a daily review.
+- **Calendar** in day, week and month views, with a day panel for the selected date:
+  tasks, reading, appointments, and a daily review. The day and week views show the
+  hours of the day with appointments at their times (click an empty hour to add one
+  there); tasks, reading and all-day appointments are listed above the hours. A small
+  month in the sidebar jumps to any date. Keys: D, W, M for the views, T for today,
+  N and P (or J and K) for the next and previous period, C for a new appointment.
 - **Tasks**: create, edit, schedule, complete, reopen, archive; categories, filters,
   search, carry-over of unfinished work, and a history of each task.
 - **Reading**: books (with optional covers), reading sessions that can be corrected,

@@ -1,0 +1,294 @@
+.grid {
+  --gutter: 56px;
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 360px;
+  overflow: hidden;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* The header and the hours share column edges; both keep room for the scrollbar. */
+.head,
+.body {
+  scrollbar-gutter: stable;
+}
+
+.head {
+  display: flex;
+  flex: none;
+  overflow-y: hidden;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.zone {
+  flex: none;
+  align-self: flex-end;
+  width: var(--gutter);
+  padding: var(--space-1) var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: 0.68rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.days {
+  flex: 1;
+  min-width: 0;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: repeat(var(--columns), minmax(0, 1fr));
+}
+
+.dayHead {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--space-1) var(--space-1) var(--space-2);
+  border-left: 1px solid var(--color-border);
+  cursor: pointer;
+}
+
+.day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  align-self: center;
+  gap: 2px;
+  padding: 2px var(--space-2);
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  cursor: pointer;
+}
+
+.single .day {
+  align-self: flex-start;
+}
+
+.weekday {
+  color: var(--color-text-secondary);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.todayText {
+  color: var(--color-primary-hover);
+}
+
+.number {
+  display: inline-grid;
+  place-items: center;
+  min-width: 40px;
+  height: 40px;
+  padding: 0 var(--space-1);
+  border-radius: 999px;
+  font-size: 1.35rem;
+  font-weight: 500;
+}
+
+.dayHead:hover .number:not(.today) {
+  background: var(--color-elevated);
+}
+
+.today {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+/* The selected day, whose details are in the side panel. */
+.selected .number:not(.today),
+.selected:hover .number:not(.today) {
+  background: var(--color-elevated);
+  box-shadow: inset 0 0 0 2px var(--color-primary);
+}
+
+.selected .today {
+  box-shadow:
+    0 0 0 2px var(--color-surface),
+    0 0 0 4px var(--color-primary);
+}
+
+.untimed {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.single .untimed {
+  max-width: 560px;
+}
+
+.chip {
+  min-width: 0;
+  padding: 1px var(--space-1);
+  background: var(--color-elevated);
+  border-radius: 4px;
+}
+
+.chip[data-type='EVENT'] {
+  background: color-mix(in srgb, var(--color-event) 26%, var(--color-surface));
+}
+
+.more {
+  align-self: flex-start;
+  padding: 0 var(--space-1);
+  background: none;
+  border: none;
+  color: var(--color-primary-hover);
+  font-size: 0.76rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.more:hover {
+  text-decoration: underline;
+}
+
+.body {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.canvas {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--gutter) repeat(var(--columns), minmax(0, 1fr));
+}
+
+.hours {
+  position: relative;
+}
+
+.hour {
+  position: absolute;
+  right: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: 0.68rem;
+  white-space: nowrap;
+  transform: translateY(-50%);
+}
+
+.column {
+  position: relative;
+  min-width: 0;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    var(--color-border) 0 1px,
+    transparent 1px var(--hour)
+  );
+  border-left: 1px solid var(--color-border);
+  cursor: pointer;
+}
+
+.selectedColumn {
+  background-color: color-mix(in srgb, var(--color-primary) 7%, transparent);
+}
+
+.event {
+  position: absolute;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 2px var(--space-2);
+  overflow: hidden;
+  background: color-mix(in srgb, var(--color-event) 30%, var(--color-surface));
+  border: none;
+  border-left: 3px solid var(--color-event);
+  border-radius: 6px;
+  box-shadow: 0 0 0 1px var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.76rem;
+  line-height: 1.3;
+  text-align: left;
+  cursor: pointer;
+}
+
+.event:hover {
+  z-index: 2;
+  background: color-mix(in srgb, var(--color-event) 44%, var(--color-surface));
+}
+
+.short {
+  flex-direction: row;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding-block: 0;
+}
+
+.eventTitle,
+.eventTime {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.eventTitle {
+  flex: none;
+  max-width: 100%;
+  font-weight: 600;
+}
+
+.short .eventTitle {
+  flex: 0 1 auto;
+}
+
+.eventTime {
+  color: var(--color-text-secondary);
+}
+
+.now {
+  position: absolute;
+  z-index: 3;
+  right: 0;
+  left: 0;
+  height: 2px;
+  margin-top: -1px;
+  background: var(--color-danger);
+  pointer-events: none;
+}
+
+.now::before {
+  position: absolute;
+  top: -5px;
+  left: -6px;
+  width: 12px;
+  height: 12px;
+  background: var(--color-danger);
+  border-radius: 50%;
+  content: '';
+}
+
+@media (forced-colors: active) {
+  .event {
+    border: 1px solid CanvasText;
+  }
+
+  .now,
+  .now::before {
+    background: Highlight;
+  }
+}
+
+/* Narrow windows stack the page, so the hours get a height of their own to scroll in. */
+@media (max-width: 1040px) {
+  .grid {
+    flex: none;
+    height: 620px;
+  }
+}

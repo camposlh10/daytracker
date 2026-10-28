@@ -3,13 +3,16 @@ import { ApiError, errorMessage, eventsApi } from '../../api/client';
 import type { CalendarEvent, Category, EventFields } from '../../api/bridge';
 import { Button } from '../../components/Button';
 import { Dialog } from '../../components/Dialog';
-import { addDays, displayTimeZone, timeZones, type IsoDate } from '../../lib/dates';
+import { addDays, displayTimeZone, timeOfDay, timeZones, type IsoDate } from '../../lib/dates';
 import { categoryName } from '../tasks/taskLabels';
 import { eventWhen } from './eventLabels';
 import form from '../../components/form.module.css';
 import styles from './EventDialog.module.css';
 
-export type EventEditorTarget = { kind: 'create'; date: IsoDate } | { kind: 'edit'; event: CalendarEvent };
+export type EventEditorTarget =
+  /** startMinutes: where the time grid was clicked; the appointment then lasts an hour. */
+  | { kind: 'create'; date: IsoDate; startMinutes?: number }
+  | { kind: 'edit'; event: CalendarEvent };
 
 interface EventDialogProps {
   target: EventEditorTarget;
@@ -35,15 +38,17 @@ interface FormValues {
 
 function valuesOf(target: EventEditorTarget): FormValues {
   if (target.kind === 'create') {
+    const start = target.startMinutes ?? 9 * 60;
     return {
       title: '',
       notes: '',
       categoryId: '',
       allDay: false,
       startDate: target.date,
-      startTime: '09:00',
+      startTime: timeOfDay(start),
       endDate: target.date,
-      endTime: '10:00',
+      // An hour later, or the end of the day for one started in its last hour.
+      endTime: timeOfDay(Math.min(start + 60, 24 * 60 - 1)),
       timezone: displayTimeZone(),
     };
   }

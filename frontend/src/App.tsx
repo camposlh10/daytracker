@@ -39,6 +39,8 @@ export function App() {
   const [view, setView] = useState<View>('calendar');
   const [dataVersion, setDataVersion] = useState(0);
   const calendar = useRef<CalendarPageHandle>(null);
+  // The sidebar spot where the calendar puts its small month.
+  const [calendarSlot, setCalendarSlot] = useState<HTMLDivElement | null>(null);
   const categoryList = useLoadable('categories', dataVersion, backend.status === 'ready', () =>
     categoriesApi.list(),
   );
@@ -95,6 +97,7 @@ export function App() {
               </li>
             ))}
           </ul>
+          <div ref={setCalendarSlot} className={styles.slot} hidden={view !== 'calendar'} />
           <MiniPlayer spotify={spotify} onOpen={() => setView('music')} />
           <button type="button" className={styles.navItem} onClick={showToday}>
             Go to today
@@ -111,6 +114,8 @@ export function App() {
               categories={categories}
               dataVersion={dataVersion}
               weekStart={preferences.weekStart}
+              active={view === 'calendar'}
+              sidebarSlot={calendarSlot}
             />
           </div>
           {view === 'reading' && (

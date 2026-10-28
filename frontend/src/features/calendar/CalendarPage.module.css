@@ -27,39 +27,44 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-width: 0;
 }
 
-.group > button {
-  padding-inline: var(--space-4);
-}
-
-.title {
+.group:first-child {
   flex: 1;
-  font-size: 1.35rem;
-  white-space: nowrap;
 }
 
-.segmented {
-  display: flex;
-  padding: 2px;
-  background: var(--color-elevated);
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
+.todayButton {
+  margin-right: var(--space-2);
+  padding-inline: var(--space-5);
 }
 
-.segment {
-  padding: var(--space-1) var(--space-4);
+.arrow {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
   background: none;
   border: none;
   border-radius: 999px;
-  color: var(--color-text-secondary);
-  font-weight: 600;
+  color: var(--color-text);
+  font-size: 1.4rem;
+  line-height: 1;
   cursor: pointer;
 }
 
-.segment[aria-pressed='true'] {
-  background: var(--color-primary);
-  color: var(--color-on-primary);
+.arrow:hover {
+  background: var(--color-elevated);
+}
+
+.title {
+  margin-left: var(--space-2);
+  overflow: hidden;
+  font-size: 1.35rem;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .error {

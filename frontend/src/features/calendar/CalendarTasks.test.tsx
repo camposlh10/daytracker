@@ -69,7 +69,8 @@ describe('CalendarPage task actions', () => {
     render(<CalendarPage today="2026-10-04" backendReady />);
     await user.click(screen.getByRole('button', { name: /^Thursday, October 15, 2026/ }));
 
-    await user.click(screen.getByRole('button', { name: '+ Add task' }));
+    await user.click(screen.getByRole('button', { name: '+ Create' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Task' }));
     const dialog = screen.getByRole('dialog', { name: 'New task' });
     expect(within(dialog).getByLabelText(/Planned date/)).toHaveValue('2026-10-15');
     await user.type(within(dialog).getByLabelText('Title'), 'Plan trip');

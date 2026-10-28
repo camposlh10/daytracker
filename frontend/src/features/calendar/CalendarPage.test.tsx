@@ -8,7 +8,7 @@ import type {
   DayDetails,
   Task,
 } from '../../api/bridge';
-import { emptyDay, installFakeBridge, progress, task } from '../../test/fakeBridge';
+import { calendarEvent, emptyDay, installFakeBridge, progress, task } from '../../test/fakeBridge';
 import { CalendarPage } from './CalendarPage';
 
 type TaskItem = Extract<CalendarItem, { type: 'TASK' }>;
@@ -45,6 +45,18 @@ const title = () => screen.getByRole('heading', { level: 1 });
 const panelDate = () => within(screen.getByRole('complementary', { name: 'Selected day' })).getByRole('heading', { level: 2 });
 const dayButton = (name: RegExp) => screen.getByRole('button', { name });
 const selectedCells = () => screen.getAllByRole('gridcell', { selected: true });
+
+/** Picks a view from the view menu, as a mouse user would. */
+async function chooseView(user: ReturnType<typeof userEvent.setup>, name: 'Day' | 'Week' | 'Month') {
+  await user.click(screen.getByRole('button', { name: /change the calendar view/ }));
+  await user.click(screen.getByRole('menuitemradio', { name }));
+}
+
+type EventItem = Extract<CalendarItem, { type: 'EVENT' }>;
+
+function eventItem(date: string, title: string, startsAt: string, endsAt: string, overrides: Partial<EventItem> = {}): CalendarItem {
+  return { type: 'EVENT', id: crypto.randomUUID(), date, title, allDay: false, startsAt, endsAt, continued: false, overlapsAnother: false, ...overrides };
+}
 
 describe('CalendarPage navigation', () => {
   it('shows a fixed six-week month with today selected', async () => {
@@ -111,7 +123,7 @@ describe('CalendarPage navigation', () => {
     installFakeBridge();
     render(<CalendarPage today="2026-10-04" backendReady />);
 
-    await user.click(screen.getByRole('button', { name: 'Week' }));
+    await chooseView(user, 'Week');
     expect(title()).toHaveTextContent('Sep 28 – Oct 4, 2026');
     expect(screen.getAllByRole('gridcell')).toHaveLength(7);
     expect(selectedCells()).toHaveLength(1);
@@ -120,7 +132,7 @@ describe('CalendarPage navigation', () => {
     expect(title()).toHaveTextContent('Oct 5 – Oct 11, 2026');
     expect(panelDate()).toHaveTextContent('Sunday, October 4, 2026');
 
-    await user.click(screen.getByRole('button', { name: 'Month' }));
+    await chooseView(user, 'Month');
     expect(title()).toHaveTextContent('October 2026');
     expect(within(selectedCells()[0]).getByRole('button', { name: /October 4, 2026/ })).toBeInTheDocument();
   });
@@ -130,11 +142,154 @@ describe('CalendarPage navigation', () => {
     installFakeBridge();
     render(<CalendarPage today="2027-01-01" backendReady />);
 
-    await user.click(screen.getByRole('button', { name: 'Week' }));
+    await chooseView(user, 'Week');
 
     expect(title()).toHaveTextContent('Dec 28, 2026 – Jan 3, 2027');
     expect(dayButton(/^Thursday, December 31, 2026/)).toBeInTheDocument();
     expect(dayButton(/^Friday, January 1, 2027, today/)).toBeInTheDocument();
+  });
+
+  it('shows one day, and moving a day there selects it', async () => {
+    const user = userEvent.setup();
+    installFakeBridge();
+    render(<CalendarPage today="2026-10-04" backendReady />);
+
+    await chooseView(user, 'Day');
+    expect(title()).toHaveTextContent('Sunday, October 4, 2026');
+    expect(screen.getAllByRole('gridcell')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: /change the calendar view/ })).toHaveTextContent('Day');
+
+    await user.click(screen.getByRole('button', { name: 'Next day' }));
+    expect(title()).toHaveTextContent('Monday, October 5, 2026');
+    expect(panelDate()).toHaveTextContent('Monday, October 5, 2026');
+
+    await user.click(screen.getByRole('button', { name: 'Today' }));
+    expect(title()).toHaveTextContent('Sunday, October 4, 2026');
+  });
+
+  it('marks the view in effect in the menu and closes it with Escape', async () => {
+    const user = userEvent.setup();
+    installFakeBridge();
+    render(<CalendarPage today="2026-10-04" backendReady />);
+
+    const menuButton = screen.getByRole('button', { name: /change the calendar view/ });
+    await user.click(menuButton);
+    expect(screen.getByRole('menuitemradio', { name: 'Month' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('menuitemradio', { name: 'Month' })).toHaveFocus();
+    await user.keyboard('{ArrowUp}');
+    expect(screen.getByRole('menuitemradio', { name: 'Week' })).toHaveFocus();
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(menuButton).toHaveFocus();
+    expect(title()).toHaveTextContent('October 2026');
+  });
+
+  it('switches views and moves with single-key shortcuts, but not while typing', async () => {
+    const user = userEvent.setup();
+    installFakeBridge();
+    render(<CalendarPage today="2026-10-04" backendReady />);
+
+    await user.keyboard('w');
+    expect(title()).toHaveTextContent('Sep 28 – Oct 4, 2026');
+    await user.keyboard('n');
+    expect(title()).toHaveTextContent('Oct 5 – Oct 11, 2026');
+    await user.keyboard('t');
+    expect(title()).toHaveTextContent('Sep 28 – Oct 4, 2026');
+    await user.keyboard('d');
+    expect(title()).toHaveTextContent('Sunday, October 4, 2026');
+    await user.keyboard('p');
+    expect(title()).toHaveTextContent('Saturday, October 3, 2026');
+
+    // Letters typed into a field stay in the field.
+    await user.type(await openTaskForm(user), 'm');
+    expect(title()).toHaveTextContent('Saturday, October 3, 2026');
+  });
+
+  it('turns the shortcuts off while another page is shown', async () => {
+    const user = userEvent.setup();
+    installFakeBridge();
+    render(<CalendarPage today="2026-10-04" backendReady active={false} />);
+
+    await user.keyboard('w');
+    expect(title()).toHaveTextContent('October 2026');
+  });
+
+  it('draws timed appointments at their hours and lists untimed items above them', async () => {
+    const user = userEvent.setup();
+    const { bridge } = installFakeBridge();
+    bridge.calendar.getRange.mockImplementation(
+      rangeOf([
+        eventItem('2026-10-04', 'Dentist', '2026-10-04T09:00:00Z', '2026-10-04T10:30:00Z'),
+        eventItem('2026-10-04', 'Call', '2026-10-04T09:30:00Z', '2026-10-04T10:00:00Z', { overlapsAnother: true }),
+        eventItem('2026-10-04', 'Holiday', '2026-10-04T00:00:00Z', '2026-10-05T00:00:00Z', { allDay: true }),
+        item('2026-10-04', 'Water plants'),
+      ]),
+    );
+    render(<CalendarPage today="2026-10-04" backendReady />);
+
+    await chooseView(user, 'Day');
+    const hours = screen.getByTestId('time-grid');
+    const dentist = await within(hours).findByRole('button', { name: /^Dentist, 9:00 AM – 10:30 AM/ });
+    const call = within(hours).getByRole('button', { name: /^Call, 9:30 AM – 10:00 AM, overlaps another/ });
+    expect(dentist.style.top).toBe(`${9 * 48}px`);
+    expect(dentist.style.height).toBe(`${1.5 * 48 - 2}px`);
+    // The two overlapping appointments share the width side by side.
+    expect(dentist.style.width).toBe('calc(50% - 6px)');
+    expect(call.style.left).toBe('calc(50% + 2px)');
+
+    const day = screen.getByRole('gridcell');
+    expect(within(day).getByText('Water plants')).toBeInTheDocument();
+    expect(within(day).getByText('Holiday')).toBeInTheDocument();
+    expect(within(hours).queryByText('Water plants')).not.toBeInTheDocument();
+    expect(within(hours).queryByText('Holiday')).not.toBeInTheDocument();
+  });
+
+  it('starts a new appointment at the clicked half hour of a day', async () => {
+    const user = userEvent.setup();
+    installFakeBridge();
+    render(<CalendarPage today="2026-10-04" backendReady />);
+    await chooseView(user, 'Week');
+
+    const tuesday = screen.getByTestId('time-grid').querySelector<HTMLElement>('[data-column="2026-09-29"]')!;
+    tuesday.getBoundingClientRect = () => ({ top: 100, left: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) });
+    // 14.6 hours down: the appointment starts at 14:30 and lasts an hour.
+    await user.pointer({ keys: '[MouseLeft]', target: tuesday, coords: { clientY: 100 + 14.6 * 48 } });
+
+    const dialog = await screen.findByRole('dialog', { name: 'New appointment' });
+    expect(within(dialog).getByLabelText('Start date')).toHaveValue('2026-09-29');
+    expect(within(dialog).getByLabelText('Start time')).toHaveValue('14:30');
+    expect(within(dialog).getByLabelText('End time')).toHaveValue('15:30');
+    expect(panelDate()).toHaveTextContent('Tuesday, September 29, 2026');
+  });
+
+  it('opens an appointment from the time grid', async () => {
+    const user = userEvent.setup();
+    const { bridge } = installFakeBridge();
+    const dentist = calendarEvent({ title: 'Dentist', startsAt: '2026-10-04T09:00:00Z', endsAt: '2026-10-04T10:00:00Z', localStart: '2026-10-04T09:00:00', localEnd: '2026-10-04T10:00:00' });
+    bridge.calendar.getRange.mockImplementation(
+      rangeOf([eventItem('2026-10-04', 'Dentist', dentist.startsAt!, dentist.endsAt!, { id: dentist.id })]),
+    );
+    bridge.events.list.mockResolvedValue({ ok: true, data: [dentist] });
+    render(<CalendarPage today="2026-10-04" backendReady />);
+    await chooseView(user, 'Day');
+
+    await user.click(await within(screen.getByTestId('time-grid')).findByRole('button', { name: /^Dentist/ }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Edit appointment' });
+    expect(within(dialog).getByLabelText('Title')).toHaveValue('Dentist');
+    expect(bridge.events.list).toHaveBeenCalledWith({ from: '2026-10-04', to: '2026-10-05' });
+  });
+
+  it('creates an appointment or a task from the Create menu', async () => {
+    const user = userEvent.setup();
+    installFakeBridge();
+    render(<CalendarPage today="2026-10-04" backendReady />);
+
+    await user.click(screen.getByRole('button', { name: '+ Create' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Appointment' }));
+    const dialog = await screen.findByRole('dialog', { name: 'New appointment' });
+    expect(within(dialog).getByLabelText('Start time')).toHaveValue('09:00');
   });
 
   it('moves between days with the arrow keys, following into the next month', async () => {

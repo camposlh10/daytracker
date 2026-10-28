@@ -40,6 +40,9 @@ let prefs: DisplayPrefs = {};
 let dayParts: Intl.DateTimeFormat | null = null;
 let timestamp = buildTimestamp();
 let clockTime = buildClockTime();
+let wallClock: Intl.DateTimeFormat | null = null;
+let hourLabel: Intl.DateTimeFormat | null = null;
+let zoneLabel: Intl.DateTimeFormat | null = null;
 
 function buildTimestamp(): Intl.DateTimeFormat {
   return new Intl.DateTimeFormat(LOCALE, { dateStyle: 'medium', timeStyle: 'short', ...prefs });
@@ -55,6 +58,9 @@ export function setDisplayPrefs(next: DisplayPrefs): void {
   }
   prefs = { timeZone: next.timeZone, hourCycle: next.hourCycle };
   dayParts = null;
+  wallClock = null;
+  hourLabel = null;
+  zoneLabel = null;
   timestamp = buildTimestamp();
   clockTime = buildClockTime();
 }
@@ -178,6 +184,41 @@ export function formatTimestamp(isoTimestamp: string): string {
 /** A stored UTC timestamp as a time of day in the display timezone: "9:30 AM". */
 export function formatTime(isoTimestamp: string): string {
   return clockTime.format(new Date(isoTimestamp));
+}
+
+/** Minutes since midnight of a stored UTC timestamp, on the clock of the display timezone. */
+export function minutesOfDay(isoTimestamp: string | Date): number {
+  wallClock ??= new Intl.DateTimeFormat('en-US', {
+    timeZone: prefs.timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  });
+  const parts = wallClock.formatToParts(typeof isoTimestamp === 'string' ? new Date(isoTimestamp) : isoTimestamp);
+  const part = (type: string) => Number(parts.find((candidate) => candidate.type === type)?.value ?? 0);
+  return (part('hour') % 24) * 60 + part('minute');
+}
+
+/** An hour of the day as a time-grid label, in the chosen clock style: "7 AM" or "07:00". */
+export function formatHour(hour: number): string {
+  hourLabel ??= new Intl.DateTimeFormat(LOCALE, {
+    timeZone: 'UTC',
+    hour: prefs.hourCycle === 'h23' ? '2-digit' : 'numeric',
+    minute: prefs.hourCycle === 'h23' ? '2-digit' : undefined,
+    hourCycle: prefs.hourCycle,
+  });
+  return hourLabel.format(Date.UTC(2023, 0, 1, hour));
+}
+
+/** The display timezone's current offset, as shown above a time grid: "GMT-4". */
+export function formatZoneOffset(now: Date = new Date()): string {
+  zoneLabel ??= new Intl.DateTimeFormat(LOCALE, { timeZone: prefs.timeZone, timeZoneName: 'shortOffset' });
+  return zoneLabel.formatToParts(now).find((part) => part.type === 'timeZoneName')?.value ?? '';
+}
+
+/** "9:30" for 570 minutes: a time-of-day field value. */
+export function timeOfDay(minutes: number): string {
+  return `${pad(Math.floor(minutes / 60))}:${pad(minutes % 60)}`;
 }
 
 /** The calendar date of a stored UTC timestamp in the display timezone. */
