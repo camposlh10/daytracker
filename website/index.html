@@ -1,0 +1,697 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Download Day Tracker</title>
+    <meta
+      name="description"
+      content="Day Tracker for Windows: plan your days, track your reading and keep your music close. Your data stays on your computer."
+    />
+    <link rel="icon" href="assets/app-icon.png" />
+    <style>
+      /* The same palette as the app (frontend/src/styles/tokens.css). */
+      :root {
+        --bg: #181b21;
+        --app-bg: #20242c;
+        --sidebar: #252a33;
+        --surface: #2b303b;
+        --elevated: #323947;
+        --border: #404855;
+        --text: #edf0f5;
+        --text-secondary: #b4bdca;
+        --primary: #668be8;
+        --primary-hover: #8aa7f0;
+        --on-primary: #14171c;
+        --reading: #c9a6f0;
+        --event: #7fc8e8;
+        --warning: #e9c46a;
+        --radius-md: 12px;
+        --radius-lg: 18px;
+        --font: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif;
+        --font-display: 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, sans-serif;
+        color-scheme: dark;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font);
+        font-size: 16px;
+        line-height: 1.55;
+      }
+
+      a {
+        color: inherit;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      :focus-visible {
+        outline: 2px solid var(--primary-hover);
+        outline-offset: 3px;
+      }
+
+      .wrap {
+        width: min(1080px, 100% - 32px);
+        margin-inline: auto;
+      }
+
+      /* ---------- Top bar ---------- */
+      .topbar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: color-mix(in srgb, var(--app-bg) 92%, transparent);
+        border-bottom: 1px solid var(--border);
+        backdrop-filter: blur(10px);
+      }
+
+      .topbar .wrap {
+        display: flex;
+        align-items: center;
+        gap: 24px;
+        height: 68px;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 1.15rem;
+        font-weight: 700;
+        text-decoration: none;
+      }
+
+      .brand img {
+        width: 34px;
+        height: 34px;
+      }
+
+      .nav {
+        display: flex;
+        gap: 28px;
+        margin: 0 auto;
+        padding: 0;
+        list-style: none;
+      }
+
+      .nav a {
+        color: var(--text-secondary);
+        font-weight: 600;
+        text-decoration: none;
+      }
+
+      .nav a:hover {
+        color: var(--text);
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        padding: 11px 22px;
+        background: var(--text);
+        border: none;
+        border-radius: 999px;
+        color: var(--on-primary);
+        font: inherit;
+        font-weight: 700;
+        text-decoration: none;
+        white-space: nowrap;
+        cursor: pointer;
+        transition: transform 120ms ease, background 120ms ease;
+      }
+
+      .pill:hover {
+        background: #ffffff;
+        transform: scale(1.03);
+      }
+
+      .pill.primary {
+        background: var(--primary);
+      }
+
+      .pill.primary:hover {
+        background: var(--primary-hover);
+      }
+
+      .pill.ghost {
+        background: transparent;
+        border: 1px solid var(--border);
+        color: var(--text);
+      }
+
+      .pill.ghost:hover {
+        background: var(--surface);
+      }
+
+      .pill svg {
+        width: 18px;
+        height: 18px;
+        flex: none;
+      }
+
+      /* ---------- Hero ---------- */
+      .hero .wrap {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+        align-items: center;
+        gap: 64px;
+        padding-block: 88px 96px;
+      }
+
+      .hero h1 {
+        font-family: var(--font-display);
+        font-size: clamp(2.6rem, 6vw, 4.6rem);
+        font-weight: 700;
+        line-height: 1.02;
+        letter-spacing: -0.02em;
+      }
+
+      .hero h1 span {
+        background: linear-gradient(90deg, var(--primary-hover), var(--reading));
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+
+      .lead {
+        margin-top: 26px;
+        max-width: 31rem;
+        font-size: 1.1rem;
+      }
+
+      .note {
+        margin-top: 14px;
+        color: var(--text-secondary);
+      }
+
+      /* The two download tiles, each with its button under it. */
+      .tiles {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 26px;
+        margin-top: 34px;
+      }
+
+      .tile {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+      }
+
+      .tile-face {
+        display: grid;
+        place-items: center;
+        width: 156px;
+        height: 156px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+      }
+
+      .tile-face svg {
+        width: 72px;
+        height: 72px;
+      }
+
+      .tile .pill {
+        width: 156px;
+      }
+
+      .tile-caption {
+        color: var(--text-secondary);
+        font-size: 0.82rem;
+        text-align: center;
+      }
+
+      /* The app, shown in a soft gradient card. */
+      .showcase {
+        position: relative;
+        padding: 34px;
+        background:
+          radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--primary) 70%, transparent), transparent 60%),
+          radial-gradient(90% 80% at 100% 100%, color-mix(in srgb, var(--warning) 55%, transparent), transparent 60%),
+          linear-gradient(135deg, #3b4f8f, #6b5aa8 50%, #b98d6a);
+        border-radius: var(--radius-lg);
+        box-shadow: 0 30px 80px rgb(0 0 0 / 45%);
+      }
+
+      .showcase img.shot {
+        display: block;
+        width: 100%;
+        height: auto;
+        border: 1px solid rgb(255 255 255 / 18%);
+        border-radius: var(--radius-md);
+        box-shadow: 0 18px 40px rgb(0 0 0 / 45%);
+      }
+
+      .weather-chip {
+        position: absolute;
+        top: -18px;
+        right: 28px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 14px 6px 8px;
+        background: var(--sidebar);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        font-weight: 700;
+        box-shadow: 0 10px 24px rgb(0 0 0 / 40%);
+      }
+
+      .weather-chip img {
+        width: 32px;
+        height: 32px;
+        image-rendering: pixelated;
+      }
+
+      /* ---------- Sections ---------- */
+      section.band {
+        padding-block: 80px;
+        border-top: 1px solid var(--border);
+      }
+
+      .band h2 {
+        font-family: var(--font-display);
+        font-size: clamp(1.8rem, 3.6vw, 2.6rem);
+        letter-spacing: -0.01em;
+      }
+
+      .band .intro {
+        margin-top: 12px;
+        max-width: 40rem;
+        color: var(--text-secondary);
+      }
+
+      .features {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px;
+        margin-top: 40px;
+      }
+
+      .feature {
+        padding: 24px;
+        background: var(--app-bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+      }
+
+      .feature .icon {
+        display: grid;
+        place-items: center;
+        width: 44px;
+        height: 44px;
+        margin-bottom: 16px;
+        border-radius: var(--radius-md);
+        font-size: 1.3rem;
+      }
+
+      .feature h3 {
+        font-size: 1.1rem;
+      }
+
+      .feature p {
+        margin-top: 8px;
+        color: var(--text-secondary);
+        font-size: 0.95rem;
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 48px;
+        align-items: start;
+      }
+
+      .services {
+        display: grid;
+        gap: 12px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .services li {
+        display: flex;
+        gap: 14px;
+        padding: 16px 18px;
+        background: var(--app-bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+      }
+
+      .services strong {
+        display: block;
+      }
+
+      .services span {
+        color: var(--text-secondary);
+        font-size: 0.92rem;
+      }
+
+      .faq details {
+        padding: 18px 20px;
+        background: var(--app-bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+      }
+
+      .faq details + details {
+        margin-top: 12px;
+      }
+
+      .faq summary {
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .faq details p {
+        margin-top: 10px;
+        color: var(--text-secondary);
+      }
+
+      kbd,
+      code {
+        padding: 1px 6px;
+        background: var(--elevated);
+        border-radius: 6px;
+        font-family: inherit;
+        font-size: 0.9em;
+      }
+
+      .cta {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        padding: 36px 40px;
+        background: linear-gradient(120deg, color-mix(in srgb, var(--primary) 30%, var(--app-bg)), var(--app-bg) 70%);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+      }
+
+      footer {
+        padding-block: 32px 48px;
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+      }
+
+      footer .wrap {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      /* ---------- Narrow screens ---------- */
+      @media (max-width: 900px) {
+        .nav {
+          display: none;
+        }
+
+        .topbar .wrap {
+          justify-content: space-between;
+        }
+
+        .hero .wrap,
+        .split {
+          grid-template-columns: 1fr;
+          gap: 48px;
+        }
+
+        .hero .wrap {
+          padding-block: 56px 64px;
+        }
+
+        .features {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 520px) {
+        .topbar .pill {
+          display: none;
+        }
+
+        .tiles {
+          gap: 16px;
+        }
+
+        .tile-face,
+        .tile .pill {
+          width: calc((100vw - 32px - 16px) / 2);
+        }
+
+        .showcase {
+          padding: 18px;
+        }
+
+        .cta {
+          padding: 28px 22px;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+
+        .pill {
+          transition: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="wrap">
+        <a class="brand" href="#top" aria-label="Day Tracker, back to the top">
+          <img src="assets/app-icon.png" alt="" width="34" height="34" />
+          Day Tracker
+        </a>
+        <ul class="nav">
+          <li><a href="#features">Features</a></li>
+          <li><a href="#privacy">Privacy</a></li>
+          <li><a href="#help">Help</a></li>
+          <li><a href="https://github.com/camposlh10/daytracker">GitHub</a></li>
+        </ul>
+        <a class="pill" href="#download">Download</a>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero" id="download" aria-labelledby="hero-title">
+        <div class="wrap">
+          <div>
+            <h1 id="hero-title">Download<br />Day Tracker<br /><span>for Windows</span></h1>
+            <p class="lead">
+              Plan your days, keep your appointments and tasks together, track your reading, and play your music
+              without leaving your calendar. All in one calm, dark desktop app.
+            </p>
+            <p class="note">Free · Windows 11, 64-bit · Version 0.1.0 · Your data stays on your computer.</p>
+
+            <div class="tiles">
+              <div class="tile">
+                <div class="tile-face" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="var(--primary-hover)">
+                    <path d="M3 5.1 10.4 4v7.2H3zM11.4 3.9 21 2.5v8.7h-9.6zM3 12.2h7.4v7.2L3 18.3zM11.4 12.2H21v8.7l-9.6-1.4z" />
+                  </svg>
+                </div>
+                <a
+                  class="pill primary"
+                  id="download-windows"
+                  href="https://github.com/camposlh10/daytracker/releases/latest/download/DayTracker-Setup-0.1.0.exe"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M12 4v11M7 10l5 5 5-5M5 20h14" />
+                  </svg>
+                  Windows
+                </a>
+                <span class="tile-caption">Installer · .exe · 64-bit</span>
+              </div>
+
+              <div class="tile">
+                <div class="tile-face" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="var(--text)">
+                    <path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.08.63-1.33-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.5 9.5 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2Z" />
+                  </svg>
+                </div>
+                <a class="pill" href="https://github.com/camposlh10/daytracker">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m8 7-5 5 5 5M16 7l5 5-5 5" />
+                  </svg>
+                  Source code
+                </a>
+                <span class="tile-caption">On GitHub · release notes</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="showcase">
+            <div class="weather-chip" aria-hidden="true">
+              <img src="assets/weather.gif" alt="" width="32" height="32" />
+              21°C
+            </div>
+            <img
+              class="shot"
+              src="assets/screenshot-calendar.png"
+              width="1650"
+              height="1080"
+              alt="Day Tracker's week view: the hours of each day with an appointment, the day's tasks and reading on the right, and the music player along the bottom."
+            />
+          </div>
+        </div>
+      </section>
+
+      <section class="band" id="features" aria-labelledby="features-title">
+        <div class="wrap">
+          <h2 id="features-title">Everything about your day, in one window</h2>
+          <p class="intro">Built for one person and their own computer: quick to open, works offline, and never asks you to sign up.</p>
+          <div class="features">
+            <article class="feature">
+              <div class="icon" style="background: color-mix(in srgb, var(--primary) 22%, transparent)" aria-hidden="true">📅</div>
+              <h3>Day, week and month</h3>
+              <p>A calendar with hours you can zoom, appointments that repeat every day, on chosen weekdays or dates, and your country's holidays already marked.</p>
+            </article>
+            <article class="feature">
+              <div class="icon" style="background: color-mix(in srgb, var(--event) 22%, transparent)" aria-hidden="true">✓</div>
+              <h3>Tasks that follow you</h3>
+              <p>Plan tasks for a day, see the ones carried over, search and filter them all, and write a short review of how the day went.</p>
+            </article>
+            <article class="feature">
+              <div class="icon" style="background: color-mix(in srgb, var(--reading) 22%, transparent)" aria-hidden="true">📖</div>
+              <h3>Reading, with covers</h3>
+              <p>Log pages against a daily target, see the book you're reading with its cover, and switch between books like a carousel.</p>
+            </article>
+            <article class="feature">
+              <div class="icon" style="background: color-mix(in srgb, #1db954 22%, transparent)" aria-hidden="true">♪</div>
+              <h3>Your music, built in</h3>
+              <p>Connect Spotify and control it from a player bar: browse Liked Songs and your playlists, pick a song, queue it, skip, seek and set the volume.</p>
+            </article>
+            <article class="feature">
+              <div class="icon" style="background: color-mix(in srgb, var(--warning) 22%, transparent)" aria-hidden="true">☀</div>
+              <h3>Weather and a greeting</h3>
+              <p>The weather where you are, in little pixel-art pictures, and a good morning, afternoon or night with your name.</p>
+            </article>
+            <article class="feature">
+              <div class="icon" style="background: color-mix(in srgb, var(--text) 14%, transparent)" aria-hidden="true">🛟</div>
+              <h3>Backed up for you</h3>
+              <p>A checked backup every day and before every upgrade, restore in a few clicks, and CSV exports of everything you track.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="band" id="privacy" aria-labelledby="privacy-title">
+        <div class="wrap split">
+          <div>
+            <h2 id="privacy-title">Your data stays on your computer</h2>
+            <p class="intro">
+              Day Tracker keeps everything in a database in your own Windows profile. There is no account and no cloud
+              copy. It only reaches the internet for the extras on the right, and only sends what each one needs.
+            </p>
+          </div>
+          <ul class="services">
+            <li>
+              <span aria-hidden="true">🌦</span>
+              <div><strong>Weather · Open-Meteo</strong><span>Your location rounded to about a kilometre, at most every 15 minutes.</span></div>
+            </li>
+            <li>
+              <span aria-hidden="true">★</span>
+              <div><strong>Holidays · Nager.Date</strong><span>Only the year and your country; each list is kept for 30 days.</span></div>
+            </li>
+            <li>
+              <span aria-hidden="true">📚</span>
+              <div><strong>Book covers · Open Library and Google Books</strong><span>Only when you look up a book.</span></div>
+            </li>
+            <li>
+              <span aria-hidden="true">♪</span>
+              <div><strong>Music · Spotify</strong><span>Only after you connect your own account; you can disconnect at any time.</span></div>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="band faq" id="help" aria-labelledby="help-title">
+        <div class="wrap">
+          <h2 id="help-title">Installing</h2>
+          <p class="intro">Download the installer, open it, and Day Tracker starts. A few things are good to know first.</p>
+          <div style="margin-top: 32px">
+            <details open>
+              <summary>Windows says “Windows protected your PC”</summary>
+              <p>
+                The installer is not code-signed yet, so Microsoft Defender SmartScreen does not know it. Choose
+                <kbd>More info</kbd>, then <kbd>Run anyway</kbd>. On a PC with Smart App Control turned on, Windows blocks
+                unsigned apps completely; a signed installer will fix that in a later version.
+              </p>
+            </details>
+            <details>
+              <summary>What do I need?</summary>
+              <p>Windows 11, 64-bit. Everything else, including Java for the app's data service, is inside the installer.</p>
+            </details>
+            <details>
+              <summary>Does the music need anything?</summary>
+              <p>
+                A Spotify Premium account (Spotify only allows playback control for Premium), a one-time free app in the
+                Spotify developer dashboard, and the Spotify app installed. Day Tracker starts it in the background when you
+                press play.
+              </p>
+            </details>
+            <details>
+              <summary>Where is my data, and how do I move it?</summary>
+              <p>
+                In <code>%APPDATA%\Day Tracker</code>. Settings has backups, restore and CSV exports. Uninstalling keeps your
+                data, so reinstalling picks up where you left off.
+              </p>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section class="band" aria-labelledby="cta-title">
+        <div class="wrap">
+          <div class="cta">
+            <div>
+              <h2 id="cta-title">Ready to plan your day?</h2>
+              <p class="intro">Free for Windows 11. Version 0.1.0.</p>
+            </div>
+            <a class="pill primary" href="https://github.com/camposlh10/daytracker/releases/latest/download/DayTracker-Setup-0.1.0.exe">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 4v11M7 10l5 5 5-5M5 20h14" />
+              </svg>
+              Download for Windows
+            </a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="wrap">
+        <span>Day Tracker · made for one person and their own computer.</span>
+        <a href="https://github.com/camposlh10/daytracker">Source code on GitHub</a>
+      </div>
+    </footer>
+  </body>
+</html>

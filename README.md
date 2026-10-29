@@ -154,6 +154,17 @@ Google Books addresses over HTTPS, checks that what it receives really is an ima
 passes images to the window through a private `dt-cover:` scheme, so the
 window itself still has no network access.
 
+## Download page
+
+`website/` is a one-page download site in the app's colours: `index.html` with its
+styles inline, and the icon, a screenshot and a weather picture in `website/assets`.
+It is static, so any host works (GitHub Pages: publish the `website` folder). The
+download buttons point to the installer of the latest GitHub release,
+`https://github.com/camposlh10/daytracker/releases/latest/download/DayTracker-Setup-0.1.0.exe`;
+attach the installer from `scripts\package.ps1` to a release with that name, and update
+the version in the page (it appears in the two download links and the version notes)
+when it changes.
+
 ## Weather
 
 The sidebar shows the weather where this computer is. Windows supplies the location
