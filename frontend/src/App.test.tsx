@@ -4,10 +4,11 @@ import { App } from './App';
 import { formatLongDate, formatMonthTitle, todayIso } from './lib/dates';
 import { appSettings, installFakeBridge } from './test/fakeBridge';
 
-/** The task form is hidden on an empty day until "+ Task" is pressed. */
-async function openTaskForm(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(await screen.findByRole('button', { name: '+ Task' }));
-  return screen.getByLabelText(/Add a task for this day/);
+/** Opens the daily review for the selected day from the Create menu. */
+async function openReview(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByRole('button', { name: '+ Create' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Daily review' }));
+  return screen.findByRole('form', { name: 'Daily review' });
 }
 
 describe('App lifecycle', () => {
@@ -57,14 +58,16 @@ describe('App lifecycle', () => {
     const user = userEvent.setup();
     const { bridge, pushState } = installFakeBridge({ status: 'ready' });
     render(<App />);
-    const input = await openTaskForm(user);
-    await user.type(input, 'Unsaved thought');
+    await user.click(await screen.findByRole('button', { name: '+ Create' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Task' }));
+    const dialog = screen.getByRole('dialog', { name: 'New task' });
+    await user.type(within(dialog).getByLabelText('Title'), 'Unsaved thought');
 
     act(() => pushState({ status: 'failed', reason: 'crashed', message: 'The data service stopped unexpectedly.' }));
 
     expect(await screen.findByText(/The data service stopped/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Add a task for this day/)).toHaveValue('Unsaved thought');
-    expect(screen.getByRole('button', { name: 'Add' })).toBeDisabled();
+    expect(within(dialog).getByLabelText('Title')).toHaveValue('Unsaved thought');
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled();
 
     await user.click(screen.getByRole('button', { name: 'Restart' }));
     expect(bridge.backend.restart).toHaveBeenCalledTimes(1);
@@ -77,7 +80,8 @@ describe('App navigation', () => {
     const user = userEvent.setup();
     installFakeBridge({ status: 'ready' });
     render(<App />);
-    await user.type(await openTaskForm(user), 'Half-written');
+    await user.type(within(await openReview(user)).getByLabelText('Wins'), 'Half-written');
+    await user.click(screen.getByRole('button', { name: 'Close' }));
 
     await user.click(screen.getByRole('button', { name: 'Tasks' }));
     expect(await screen.findByText('No tasks yet')).toBeInTheDocument();
@@ -85,20 +89,7 @@ describe('App navigation', () => {
 
     await user.click(screen.getByRole('button', { name: 'Calendar' }));
     expect(screen.getByRole('grid')).toBeInTheDocument();
-    expect(screen.getByLabelText(/Add a task for this day/)).toHaveValue('Half-written');
-  });
-
-  it('returns to today from another view', async () => {
-    const user = userEvent.setup();
-    installFakeBridge({ status: 'ready' });
-    render(<App />);
-    await screen.findByRole('grid');
-    await user.click(screen.getByRole('button', { name: 'Next month' }));
-    await user.click(screen.getByRole('button', { name: 'Tasks' }));
-
-    await user.click(screen.getByRole('button', { name: 'Go to today' }));
-
-    expect(screen.getByRole('grid', { name: formatMonthTitle(todayIso()) })).toBeInTheDocument();
+    expect(within(await openReview(user)).getByLabelText('Wins')).toHaveValue('Half-written');
   });
 });
 

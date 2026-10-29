@@ -37,6 +37,10 @@ describe('theme contrast', () => {
     expect(contrast('color-text-secondary', surface)).toBeGreaterThanOrEqual(4.5);
   });
 
+  it.each(['color-past', 'color-surface', 'color-sidebar'])('past-day text on %s is at least 4.5:1', (surface) => {
+    expect(contrast('color-text-past', surface)).toBeGreaterThanOrEqual(4.5);
+  });
+
   it.each(['color-primary', 'color-primary-hover'])('button text on %s is at least 4.5:1', (background) => {
     expect(contrast('color-on-primary', background)).toBeGreaterThanOrEqual(4.5);
   });

@@ -118,6 +118,7 @@ export function MiniMonth({ selected, today, weekStart, visible, onSelect }: Min
                 const classes = [
                   styles.date,
                   !isSameMonth(date, month) && styles.outside,
+                  date < today && styles.past,
                   visible.includes(date) && styles.inView,
                   date === selected && styles.selected,
                   date === today && styles.today,

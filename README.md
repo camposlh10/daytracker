@@ -161,6 +161,13 @@ own Spotify devices (Spotify Connect): the Spotify desktop app, your phone, a sp
 The sound comes from that device, not from Day Tracker. It needs the internet and is
 only used when you open it; until you connect, nothing is sent to Spotify.
 
+You don't have to open Spotify yourself. When you press play and nothing is playing
+anywhere, Day Tracker plays on this computer's Spotify if it is open; otherwise it
+starts the Spotify app minimized (the installer's copy in `%APPDATA%\Spotify`, or the
+Microsoft Store app) and plays as soon as it appears, within 30 seconds. If Spotify is
+not installed here, it plays on another open device, such as your phone. The Spotify
+app needs to be installed and signed in with the same account once.
+
 Spotify only allows this for apps registered by the user, so setup is once:
 
 1. At `developer.spotify.com/dashboard`, create an app.

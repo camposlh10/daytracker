@@ -155,14 +155,15 @@ describe('Music (Spotify)', () => {
 
   it.each([
     ['SPOTIFY_PREMIUM_REQUIRED', 'Spotify only allows controlling playback with a Premium account.'],
-    ['SPOTIFY_NO_DEVICE', 'No Spotify device is active. Open Spotify on this computer or your phone, then try again.'],
+    ['SPOTIFY_NO_DEVICE', 'Nothing is playing on Spotify right now. Press play to start it.'],
   ])('explains %s', async (code, message) => {
     const { user } = await openMusic((fake) => {
       fake.spotify.status.mockResolvedValue({ ok: true, data: CONNECTED });
       fake.spotify.play.mockResolvedValue({ ok: false, error: { status: 403, code, message } });
     });
 
-    await user.click(await screen.findByRole('button', { name: 'Play' }));
+    const now = await screen.findByRole('region', { name: 'Now playing' });
+    await user.click(await within(now).findByRole('button', { name: 'Play' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(message);
   });

@@ -1,6 +1,12 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { spotifyApi, spotifyImageUrl } from '../../api/client';
-import type { SpotifyDevice, SpotifyPlaylist, SpotifySearchResult, SpotifyTrack } from '../../api/bridge';
+import type {
+  SpotifyDevice,
+  SpotifyPlayback,
+  SpotifyPlaylist,
+  SpotifySearchResult,
+  SpotifyTrack,
+} from '../../api/bridge';
 import { Button } from '../../components/Button';
 import { LoadingState } from '../../components/States';
 import form from '../../components/form.module.css';
@@ -26,7 +32,8 @@ function duration(ms: number): string {
 
 /**
  * Spotify: set up the connection, see and control what plays, search, and start
- * playlists. Sound comes from one of the user's Spotify devices (Spotify Connect).
+ * playlists. Sound comes from one of the user's Spotify devices (Spotify Connect);
+ * when none is playing, the desktop side starts Spotify on this computer by itself.
  */
 export function MusicPage({ spotify }: { spotify: SpotifyState }) {
   const { status } = spotify;
@@ -214,7 +221,7 @@ function Connected({ spotify }: { spotify: SpotifyState }) {
               if (event.target.value) void spotify.run(() => spotifyApi.transfer(event.target.value));
             }}
           >
-            <option value="">The active device</option>
+            <option value="">Automatic</option>
             {(devices ?? []).map((device) => (
               <option key={device.id} value={device.id}>
                 {device.name}
@@ -227,7 +234,13 @@ function Connected({ spotify }: { spotify: SpotifyState }) {
           </Button>
         </div>
         {devices?.length === 0 && (
-          <p className={styles.muted}>No devices found. Open Spotify on this computer or your phone.</p>
+          <p className={styles.muted}>No devices are open. Press play and Day Tracker starts Spotify on this computer.</p>
+        )}
+        {devices === null && (
+          <p className={styles.muted}>
+            Automatic plays where music is already playing; when nothing is, Day Tracker starts Spotify on this
+            computer in the background.
+          </p>
         )}
       </section>
 
@@ -309,17 +322,15 @@ function NowPlaying({ spotify }: { spotify: SpotifyState }) {
 }
 
 /** Previous, play or pause, next. Shared by the Music page and the sidebar. */
-export function Controls({ spotify, compact = false }: { spotify: SpotifyState; compact?: boolean }) {
+export function Controls({ spotify }: { spotify: SpotifyState }) {
   const playing = spotify.playback?.isPlaying === true;
   return (
-    <div className={compact ? styles.controlsCompact : styles.controls} role="group" aria-label="Playback">
-      {!compact && (
-        <Button aria-label="Previous song" disabled={spotify.busy} onClick={() => void spotify.run(spotifyApi.previous)}>
-          ⏮
-        </Button>
-      )}
+    <div className={styles.controls} role="group" aria-label="Playback">
+      <Button aria-label="Previous song" disabled={spotify.busy} onClick={() => void spotify.run(spotifyApi.previous)}>
+        ⏮
+      </Button>
       <Button
-        variant={compact ? 'secondary' : 'primary'}
+        variant="primary"
         aria-label={playing ? 'Pause' : 'Play'}
         disabled={spotify.busy}
         onClick={() => void spotify.run(() => (playing ? spotifyApi.pause() : spotifyApi.play()))}
@@ -369,19 +380,111 @@ function PlaylistRow({ playlist, onPlay }: { playlist: SpotifyPlaylist; onPlay: 
   );
 }
 
-/** A small now-playing line for the sidebar, shown while something is loaded on a device. */
+/**
+ * Where the song is now. Spotify is asked every few seconds; in between, the
+ * position moves on by itself while the song plays.
+ */
+function useLivePosition(playback: SpotifyPlayback | null): number {
+  const [anchor, setAnchor] = useState(() => ({ progress: playback?.progressMs ?? 0, at: Date.now() }));
+  const [, setTick] = useState(0);
+  const playing = playback?.isPlaying === true;
+
+  useEffect(() => {
+    setAnchor({ progress: playback?.progressMs ?? 0, at: Date.now() });
+  }, [playback]);
+
+  useEffect(() => {
+    if (!playing) {
+      return;
+    }
+    const timer = setInterval(() => setTick((tick) => tick + 1), 1000);
+    return () => clearInterval(timer);
+  }, [playing]);
+
+  const length = playback?.track?.durationMs ?? 0;
+  return Math.min(anchor.progress + (playing ? Date.now() - anchor.at : 0), length);
+}
+
+/**
+ * The player at the bottom of the sidebar: the song, its artist and cover, how
+ * far it has played, and previous, play or pause, and next. Before Spotify is
+ * connected it only offers to set it up.
+ */
 export function MiniPlayer({ spotify, onOpen }: { spotify: SpotifyState; onOpen: () => void }) {
-  const track = spotify.playback?.track;
-  if (!spotify.status?.connected || !track) {
+  const { playback } = spotify;
+  const track = playback?.track ?? null;
+  const position = useLivePosition(playback);
+  const playing = playback?.isPlaying === true;
+
+  if (!spotify.status) {
     return null;
   }
+  if (!spotify.status.connected) {
+    return (
+      <button type="button" className={styles.miniSetup} onClick={onOpen}>
+        <span aria-hidden="true">♪</span> Set up Spotify
+      </button>
+    );
+  }
+
   return (
     <section className={styles.mini} aria-label="Now playing on Spotify">
-      <button type="button" className={styles.miniTitle} onClick={onOpen} title={`${track.name} · ${track.artists}`}>
-        <span>{track.name}</span>
-        <span className={styles.muted}>{track.artists}</span>
+      <button
+        type="button"
+        className={styles.miniTrack}
+        title={track ? `${track.name} · ${track.artists}` : 'Open Music'}
+        onClick={onOpen}
+      >
+        <Art imageId={track?.imageId ?? null} label={track?.name ?? '♪'} />
+        <span className={styles.miniText}>
+          <span className={styles.miniName}>{track ? track.name : 'Nothing playing'}</span>
+          <span className={styles.miniArtist}>{track ? track.artists : 'Pick music on the Music page'}</span>
+        </span>
       </button>
-      <Controls spotify={spotify} compact />
+      {track && (
+        <div className={styles.miniProgress}>
+          <progress
+            className={styles.miniBar}
+            value={position}
+            max={track.durationMs}
+            aria-label="Song position"
+            aria-valuetext={`${duration(position)} of ${duration(track.durationMs)}`}
+          />
+          <div className={styles.miniTimes} aria-hidden="true">
+            <span>{duration(position)}</span>
+            <span>{duration(track.durationMs)}</span>
+          </div>
+        </div>
+      )}
+      <div className={styles.miniControls} role="group" aria-label="Playback">
+        <button
+          type="button"
+          className={styles.miniButton}
+          aria-label="Previous song"
+          disabled={spotify.busy}
+          onClick={() => void spotify.run(spotifyApi.previous)}
+        >
+          ⏮
+        </button>
+        <button
+          type="button"
+          className={`${styles.miniButton} ${styles.miniPlay}`}
+          aria-label={playing ? 'Pause' : 'Play'}
+          disabled={spotify.busy}
+          onClick={() => void spotify.run(() => (playing ? spotifyApi.pause() : spotifyApi.play()))}
+        >
+          {playing ? '⏸' : '▶'}
+        </button>
+        <button
+          type="button"
+          className={styles.miniButton}
+          aria-label="Next song"
+          disabled={spotify.busy}
+          onClick={() => void spotify.run(spotifyApi.next)}
+        >
+          ⏭
+        </button>
+      </div>
     </section>
   );
 }

@@ -31,6 +31,10 @@ const fake = {
   nextPlayerError: null,
   revoked: false,
   tokenCalls: 0,
+  devices: [{ id: 'device1', name: 'Laptop', type: 'Computer', is_active: true }, { id: null, name: 'Restricted' }],
+  // How many more play commands fail as if nothing were playing.
+  idlePlays: 0,
+  lastTransfer: null,
 };
 let counter = 0;
 const server = createServer(async (request, response) => {
@@ -115,7 +119,7 @@ const server = createServer(async (request, response) => {
       });
     }
     if (route === 'GET /v1/me/playlists') return json(200, { items: [{ uri: 'spotify:playlist:1111111111111111111111', name: 'Mine', owner: { display_name: 'Ana' }, tracks: { total: 3 }, images: [] }] });
-    if (route === 'GET /v1/me/player/devices') return json(200, { devices: [{ id: 'device1', name: 'Laptop', type: 'Computer', is_active: true }, { id: null, name: 'Restricted' }] });
+    if (route === 'GET /v1/me/player/devices') return json(200, { devices: fake.devices });
     if (route === 'GET /v1/me/player') return fake.nothingPlaying ? json(204) : json(200, { is_playing: true, progress_ms: 1234, device: { name: 'Laptop' }, item: { type: 'track', uri: `spotify:track:${TRACK_ID}`, name: 'Clair de Lune', artists: [], album: { images: [] } } });
     if (url.pathname.startsWith('/v1/me/player')) {
       if (fake.nextPlayerError) {
@@ -124,9 +128,14 @@ const server = createServer(async (request, response) => {
         return json(error.status, { error: { status: error.status, message: error.message, reason: error.reason } }, error.headers);
       }
       if (route === 'PUT /v1/me/player/play') {
+        if (fake.idlePlays > 0) {
+          fake.idlePlays -= 1;
+          return json(404, { error: { status: 404, message: 'Player command failed: No active device found', reason: 'NO_ACTIVE_DEVICE' } });
+        }
         fake.lastPlayBody = body ? JSON.parse(body) : null;
         fake.lastPlayQuery = url.searchParams;
       }
+      if (route === 'PUT /v1/me/player') fake.lastTransfer = JSON.parse(body);
       return json(204);
     }
   }
@@ -140,6 +149,9 @@ const saved = { clientId: null, redirectUri: null, refreshToken: null };
 const registered = [];
 const store = { load: async () => ({ ...saved }), save: async (data) => Object.assign(saved, data) };
 const opened = [];
+// A client for picking a device when nothing plays, on the same connection as the main one.
+const wakingClient = (options) =>
+  new SpotifyClient({ store, openBrowser: async () => undefined, apiBase: `${base}/v1`, accountsBase: `${base}/accounts`, deviceWaitMs: 400, devicePollMs: 20, ...options });
 const client = new SpotifyClient({
   store,
   // The "browser": follows Spotify's redirect back to the app's listener, or hands an
@@ -227,8 +239,45 @@ try {
   const premium = await client.pause();
   check(!premium.ok && premium.error.code === 'SPOTIFY_PREMIUM_REQUIRED', 'a free account is told that playback control needs Premium');
   fake.nextPlayerError = { status: 404, reason: 'NO_ACTIVE_DEVICE', message: 'Player command failed: No active device found' };
-  const noDevice = await client.play();
-  check(!noDevice.ok && noDevice.error.code === 'SPOTIFY_NO_DEVICE', 'no open Spotify app is explained');
+  const noDevice = await client.pause();
+  check(!noDevice.ok && noDevice.error.code === 'SPOTIFY_NO_DEVICE', 'pausing with nothing playing is explained');
+
+  console.log('Playing when nothing is playing');
+  const allDevices = fake.devices;
+  let starts = 0;
+  fake.idlePlays = 1;
+  fake.lastTransfer = null;
+  const openDevice = await wakingClient({ startSpotify: async () => false }).play();
+  check(openDevice.ok && fake.lastTransfer?.device_ids?.[0] === 'device1' && fake.lastTransfer.play === true, 'resuming carries on on an open device when Spotify cannot be started here');
+
+  fake.devices = [{ id: 'phone1', name: 'Pixel', type: 'Smartphone', is_active: false }, { id: 'here1', name: 'mimosa', type: 'Computer', is_active: false }];
+  fake.idlePlays = 1;
+  const here = await wakingClient({ computerName: 'MIMOSA', startSpotify: async () => (starts++, true) }).play({ uri: 'spotify:playlist:37i9dQZF1DXcBWIGoYBM5M' });
+  check(here.ok && fake.lastPlayQuery.get('device_id') === 'here1' && starts === 0, 'this computer’s open Spotify is chosen over a phone, without starting another');
+
+  fake.devices = [{ id: 'phone1', name: 'Pixel', type: 'Smartphone', is_active: false }];
+  fake.idlePlays = 2;
+  const started = await wakingClient({
+    computerName: 'MIMOSA',
+    startSpotify: async () => {
+      starts++;
+      // Spotify signs in and appears a moment later, under a name of its own.
+      setTimeout(() => fake.devices.push({ id: 'desk1', name: 'My desk', type: 'Computer', is_active: false }), 60);
+      return true;
+    },
+  }).play({ uri: `spotify:track:${TRACK_ID}` });
+  check(started.ok && starts === 1 && fake.lastPlayQuery.get('device_id') === 'desk1', 'Spotify is started here and plays once it appears, waiting out a first refusal');
+
+  fake.devices = [];
+  fake.idlePlays = 1;
+  const neverAppears = await wakingClient({ startSpotify: async () => true }).play();
+  check(!neverAppears.ok && neverAppears.error.code === 'SPOTIFY_NO_DEVICE' && neverAppears.error.message.includes('sign in'), 'a started Spotify that never appears asks to sign in to it once');
+
+  fake.idlePlays = 1;
+  const notInstalled = await wakingClient({ startSpotify: async () => false }).play();
+  check(!notInstalled.ok && notInstalled.error.message.includes('not installed'), 'no Spotify on this computer and no other device is explained');
+  fake.idlePlays = 0;
+  fake.devices = allDevices;
   fake.nextPlayerError = { status: 429, message: 'API rate limit exceeded', headers: { 'Retry-After': '7' } };
   const limited = await client.next();
   check(!limited.ok && limited.error.code === 'SPOTIFY_RATE_LIMITED' && limited.error.message.includes('7 seconds'), 'rate limiting says how long to wait');

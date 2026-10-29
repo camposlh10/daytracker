@@ -26,13 +26,16 @@ describe('keyboard-only use', () => {
     await waitFor(() => expect(grid.querySelector(`[data-date="${tomorrow}"]`)).toHaveFocus());
     expect(grid.querySelector(`[data-date="${tomorrow}"]`)).toHaveAttribute('tabindex', '0');
 
-    // Tab onward to the add-task field in the day panel, type, and submit with Enter.
-    const add = await screen.findByRole('button', { name: '+ Task' });
-    add.focus();
+    // Open the Create menu from the keyboard, choose Task, type, and save with Enter.
+    screen.getByRole('button', { name: '+ Create' }).focus();
     await user.keyboard('{Enter}');
-    const field = await screen.findByLabelText(/Add a task for this day/);
-    expect(field).toHaveFocus();
-    await user.keyboard('Pay the bills{Enter}');
+    await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Appointment' })).toHaveFocus());
+    await user.keyboard('{ArrowDown}{Enter}');
+    const dialog = await screen.findByRole('dialog', { name: 'New task' });
+    expect(within(dialog).getByLabelText('Title')).toHaveFocus();
+    await user.keyboard('Pay the bills');
+    within(dialog).getByRole('button', { name: 'Save' }).focus();
+    await user.keyboard('{Enter}');
 
     await waitFor(() => expect(bridge.tasks.create).toHaveBeenCalledTimes(1));
     expect(bridge.tasks.create.mock.calls[0][0]).toMatchObject({ title: 'Pay the bills', plannedDate: tomorrow });

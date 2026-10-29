@@ -9,4 +9,6 @@ afterEach(() => {
   cleanup();
   // Display preferences are module state; one test's timezone must not reach the next.
   setDisplayPrefs({});
+  // So is what the page remembers, such as the calendar's zoom.
+  window.localStorage.clear();
 });

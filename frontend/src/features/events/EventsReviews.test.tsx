@@ -191,23 +191,34 @@ describe('EventDialog', () => {
   });
 });
 
-/** The review form is hidden until a review exists or "+ Review" is pressed. */
+/** Opens the daily review for the selected day from the Create menu. */
 async function openReview(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(await screen.findByRole('button', { name: '+ Review' }));
-  return screen.getByRole('form', { name: 'Daily review' });
+  await user.click(await screen.findByRole('button', { name: '+ Create' }));
+  await user.click(screen.getByRole('menuitem', { name: 'Daily review' }));
+  return screen.findByRole('form', { name: 'Daily review' });
 }
 
+const closeReview = (user: ReturnType<typeof userEvent.setup>) =>
+  user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' }));
+
 describe('Daily review', () => {
-  it('is not shown on an empty day, only a button to start one', async () => {
+  it('opens from the Create menu in a dialog, not in the day panel', async () => {
+    const user = userEvent.setup();
     installFakeBridge();
     render(<CalendarPage today={TODAY} backendReady />);
 
-    expect(await screen.findByRole('button', { name: '+ Review' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Reading' })).toBeInTheDocument();
     expect(screen.queryByRole('form', { name: 'Daily review' })).not.toBeInTheDocument();
-    expect(screen.queryByText('Not written yet')).not.toBeInTheDocument();
-    // The same goes for the other empty sections.
-    expect(screen.getByRole('button', { name: '+ Appointment' })).toBeInTheDocument();
-    expect(screen.queryByText('No appointments.')).not.toBeInTheDocument();
+    const review = await openReview(user);
+    expect(screen.getByRole('dialog', { name: 'Daily review · Sunday, October 4, 2026' })).toContainElement(review);
+    expect(within(review).getByText('Not written yet')).toBeInTheDocument();
+    await closeReview(user);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '+ Review' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '+ Task' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '+ Appointment' })).not.toBeInTheDocument();
+    // A day without appointments has no Agenda section.
+    expect(screen.queryByRole('heading', { name: 'Agenda' })).not.toBeInTheDocument();
   });
 
   it('saves the first review with no version and marks unsaved edits until then', async () => {
@@ -240,7 +251,8 @@ describe('Daily review', () => {
     bridge.calendar.getDay.mockResolvedValue(dayWith(TODAY, { review: saved }));
     bridge.reviews.save.mockResolvedValue({ ok: true, data: { ...saved, version: 5 } });
     render(<CalendarPage today={TODAY} backendReady />);
-    const review = await screen.findByRole('form', { name: 'Daily review' });
+    await screen.findByRole('heading', { name: 'Reading' });
+    const review = await openReview(user);
     await waitFor(() => expect(within(review).getByLabelText('Obstacles')).toHaveValue('Noise'));
 
     await user.type(within(review).getByLabelText("Tomorrow's priority"), 'Rest');
@@ -259,28 +271,30 @@ describe('Daily review', () => {
     const { bridge } = installFakeBridge();
     bridge.reviews.save.mockResolvedValue({ ok: true, data: dailyReview({ wins: 'Kept' }) });
     render(<CalendarPage today={TODAY} backendReady />);
-    const review = await openReview(user);
-    await user.type(within(review).getByLabelText('Wins'), 'Kept');
+    await user.type(within(await openReview(user)).getByLabelText('Wins'), 'Kept');
+    // Closing the dialog keeps the text.
+    await closeReview(user);
 
     // Cancel stays on the day with the text intact.
     await user.click(dayButton(/^Friday, October 2, 2026/));
     const dialog = screen.getByRole('dialog', { name: 'Unsaved changes' });
-    expect(dialog).toHaveTextContent('the daily review');
+    expect(dialog).toHaveTextContent('daily review');
     await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
     expect(panelDate()).toHaveTextContent('Sunday, October 4, 2026');
-    expect(within(review).getByLabelText('Wins')).toHaveValue('Kept');
+    expect(within(await openReview(user)).getByLabelText('Wins')).toHaveValue('Kept');
+    await closeReview(user);
 
     // Save writes the review for the day it was typed on, then moves.
     await user.click(dayButton(/^Friday, October 2, 2026/));
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(panelDate()).toHaveTextContent('Friday, October 2, 2026'));
     expect(bridge.reviews.save).toHaveBeenCalledWith(TODAY, expect.objectContaining({ wins: 'Kept' }));
-    // The new day starts with no review form open.
-    expect(screen.queryByRole('form', { name: 'Daily review' })).not.toBeInTheDocument();
+    // The new day's review starts empty.
+    expect(within(await openReview(user)).getByLabelText('Wins')).toHaveValue('');
 
     // Discard drops the text and moves without saving.
-    await openReview(user);
     await user.type(screen.getByLabelText('Obstacles'), 'Gone soon');
+    await closeReview(user);
     await user.click(dayButton(/^Thursday, October 1, 2026/));
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Discard' }));
     expect(panelDate()).toHaveTextContent('Thursday, October 1, 2026');
@@ -295,12 +309,14 @@ describe('Daily review', () => {
       error: { status: 409, code: 'CONFLICT', message: 'The review was changed after it was loaded.' },
     });
     render(<CalendarPage today={TODAY} backendReady />);
-    const review = await openReview(user);
-    await user.type(within(review).getByLabelText('Wins'), 'Precious words');
+    await user.type(within(await openReview(user)).getByLabelText('Wins'), 'Precious words');
+    await closeReview(user);
 
     await user.click(dayButton(/^Friday, October 2, 2026/));
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save' }));
 
+    // The review opens again, with why it was not saved.
+    const review = await screen.findByRole('form', { name: 'Daily review' });
     expect(await within(review).findByRole('alert')).toHaveTextContent('changed elsewhere');
     expect(panelDate()).toHaveTextContent('Sunday, October 4, 2026');
     expect(within(review).getByLabelText('Wins')).toHaveValue('Precious words');
@@ -314,9 +330,10 @@ describe('Daily review', () => {
 
     await user.click(dayButton(/^Monday, October 5, 2026/));
 
-    // A future day offers other additions, but no review.
-    expect(await screen.findByRole('button', { name: '+ Task' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '+ Review' })).not.toBeInTheDocument();
+    // A future day has no review to write.
+    await user.click(screen.getByRole('button', { name: '+ Create' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Daily review' }));
+    expect(await screen.findByRole('dialog')).toHaveTextContent('A review can be written for today or an earlier day.');
     expect(screen.queryByRole('region', { name: 'Daily review' })).not.toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: 'Wins' })).not.toBeInTheDocument();
   });

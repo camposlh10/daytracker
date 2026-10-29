@@ -9,6 +9,9 @@
   --color-border-strong: #7b8596;
   --color-text: #edf0f5;
   --color-text-secondary: #b4bdca;
+  /* Days that have passed: a quieter surface and text, still 4.5:1 apart. */
+  --color-past: #22262d;
+  --color-text-past: #939cab;
   --color-primary: #668be8;
   --color-primary-hover: #8aa7f0;
   /* White on the primary blue is only about 3.3:1; this dark text is above 5:1. */

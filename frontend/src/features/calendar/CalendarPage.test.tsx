@@ -35,11 +35,6 @@ function dayOf(date: string, titles: string[], carryOver: Task[] = []): ApiResul
   };
 }
 
-/** The task form is hidden on an empty day until "+ Task" is pressed. */
-async function openTaskForm(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(await screen.findByRole('button', { name: '+ Task' }));
-  return screen.getByLabelText(/Add a task for this day/);
-}
 
 const title = () => screen.getByRole('heading', { level: 1 });
 const panelDate = () => within(screen.getByRole('complementary', { name: 'Selected day' })).getByRole('heading', { level: 2 });
@@ -202,7 +197,9 @@ describe('CalendarPage navigation', () => {
     expect(title()).toHaveTextContent('Saturday, October 3, 2026');
 
     // Letters typed into a field stay in the field.
-    await user.type(await openTaskForm(user), 'm');
+    await user.click(screen.getByRole('button', { name: '+ Create' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Task' }));
+    await user.type(within(screen.getByRole('dialog')).getByLabelText('Title'), 'm');
     expect(title()).toHaveTextContent('Saturday, October 3, 2026');
   });
 
@@ -281,6 +278,50 @@ describe('CalendarPage navigation', () => {
     expect(bridge.events.list).toHaveBeenCalledWith({ from: '2026-10-04', to: '2026-10-05' });
   });
 
+  it('zooms the hours with Ctrl + plus and minus, remembers it, and resets with Ctrl + 0', async () => {
+    const user = userEvent.setup();
+    const { bridge } = installFakeBridge();
+    bridge.calendar.getRange.mockImplementation(
+      rangeOf([eventItem('2026-10-04', 'Dentist', '2026-10-04T09:00:00Z', '2026-10-04T10:00:00Z')]),
+    );
+    const { unmount } = render(<CalendarPage today="2026-10-04" backendReady />);
+    await chooseView(user, 'Day');
+    const dentist = () => within(screen.getByTestId('time-grid')).getByRole('button', { name: /^Dentist/ });
+    expect((await within(screen.getByTestId('time-grid')).findByRole('button', { name: /^Dentist/ })).style.top).toBe('432px');
+
+    await user.keyboard('{Control>}={/Control}');
+    expect(dentist().style.top).toBe(`${9 * 64}px`);
+    await user.keyboard('{Control>}={/Control}');
+    expect(dentist().style.top).toBe(`${9 * 80}px`);
+    await user.keyboard('{Control>}-{/Control}');
+    expect(dentist().style.top).toBe(`${9 * 64}px`);
+
+    // The buttons do the same, and the zoom is kept for next time.
+    await user.click(screen.getByRole('button', { name: 'Zoom out' }));
+    await user.click(screen.getByRole('button', { name: 'Zoom out' }));
+    expect(dentist().style.top).toBe(`${9 * 40}px`);
+    unmount();
+    render(<CalendarPage today="2026-10-04" backendReady />);
+    await chooseView(user, 'Day');
+    expect((await within(screen.getByTestId('time-grid')).findByRole('button', { name: /^Dentist/ })).style.top).toBe(`${9 * 40}px`);
+
+    await user.keyboard('{Control>}0{/Control}');
+    expect(dentist().style.top).toBe('432px');
+  });
+
+  it('zooms out no further than the smallest size', async () => {
+    const user = userEvent.setup();
+    installFakeBridge();
+    render(<CalendarPage today="2026-10-04" backendReady />);
+    await chooseView(user, 'Day');
+
+    for (let step = 0; step < 12; step += 1) {
+      await user.keyboard('{Control>}-{/Control}');
+    }
+    expect(screen.getByRole('button', { name: 'Zoom out' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Zoom in' })).toBeEnabled();
+  });
+
   it('creates an appointment or a task from the Create menu', async () => {
     const user = userEvent.setup();
     installFakeBridge();
@@ -318,9 +359,10 @@ describe('CalendarPage selected day', () => {
       date === '2026-10-15' ? dayOf(date, ['Dentist', 'Groceries']) : dayOf(date, []),
     );
     render(<CalendarPage today="2026-10-04" backendReady />);
-    // An empty day shows no Tasks section, only a way to add the first task.
-    expect(await screen.findByRole('button', { name: '+ Task' })).toBeInTheDocument();
+    // An empty day has no Tasks section at all; tasks are added from the Create menu.
+    expect(await screen.findByRole('heading', { name: 'Reading' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Tasks' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Add a task for this day/)).not.toBeInTheDocument();
     expect(screen.queryByText(/No tasks planned/)).not.toBeInTheDocument();
 
     await user.click(dayButton(/^Thursday, October 15, 2026/));
@@ -435,102 +477,5 @@ describe('CalendarPage selected day', () => {
 
     expect(await screen.findByText(/This day could not be loaded/)).toBeInTheDocument();
     expect(screen.queryByText('No tasks planned for this day.')).not.toBeInTheDocument();
-  });
-});
-
-describe('CalendarPage adding tasks', () => {
-  it('plans a new task on the selected date and refreshes the calendar', async () => {
-    const user = userEvent.setup();
-    const { bridge } = installFakeBridge();
-    bridge.tasks.create.mockResolvedValue({ ok: true, data: task({ title: 'Book flights' }) });
-    render(<CalendarPage today="2026-10-04" backendReady />);
-    await user.click(dayButton(/^Thursday, October 15, 2026/));
-    const readsBefore = bridge.calendar.getRange.mock.calls.length;
-
-    await user.type(await openTaskForm(user), 'Book flights{Enter}');
-
-    await waitFor(() => expect(screen.getByLabelText(/Add a task for this day/)).toHaveValue(''));
-    expect(bridge.tasks.create).toHaveBeenCalledWith(
-      expect.objectContaining({ title: 'Book flights', plannedDate: '2026-10-15' }),
-    );
-    await waitFor(() => expect(bridge.calendar.getRange.mock.calls.length).toBeGreaterThan(readsBefore));
-    expect(bridge.calendar.getDay).toHaveBeenLastCalledWith('2026-10-15');
-  });
-
-  it('keeps the typed title when saving fails', async () => {
-    const user = userEvent.setup();
-    const { bridge } = installFakeBridge();
-    bridge.tasks.create.mockResolvedValue({
-      ok: false,
-      error: { status: 0, code: 'BACKEND_UNREACHABLE', message: 'The data service did not respond.' },
-    });
-    render(<CalendarPage today="2026-10-04" backendReady />);
-
-    await user.type(await openTaskForm(user), 'Call the bank{Enter}');
-
-    expect(await screen.findByText(/Not saved: The data service did not respond/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Add a task for this day/)).toHaveValue('Call the bank');
-  });
-
-  it('asks to save, discard, or cancel before leaving a day with an unsaved task', async () => {
-    const user = userEvent.setup();
-    const { bridge } = installFakeBridge();
-    bridge.tasks.create.mockResolvedValue({ ok: true, data: task({ title: 'Draft' }) });
-    render(<CalendarPage today="2026-10-04" backendReady />);
-    const input = await openTaskForm(user);
-
-    // Cancel: stay on the day and keep the draft.
-    await user.type(input, 'Draft');
-    await user.click(dayButton(/^Thursday, October 15, 2026/));
-    const dialog = screen.getByRole('dialog', { name: 'Unsaved changes' });
-    expect(panelDate()).toHaveTextContent('Sunday, October 4, 2026');
-    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(panelDate()).toHaveTextContent('Sunday, October 4, 2026');
-    expect(input).toHaveValue('Draft');
-
-    // Today and arrow keys are guarded the same way.
-    dayButton(/^Sunday, October 4, 2026/).focus();
-    await user.keyboard('{ArrowRight}');
-    await user.keyboard('{Escape}');
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(panelDate()).toHaveTextContent('Sunday, October 4, 2026');
-
-    // Save: the task is planned on the day it was typed for, then the day changes.
-    await user.click(dayButton(/^Thursday, October 15, 2026/));
-    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(panelDate()).toHaveTextContent('Thursday, October 15, 2026'));
-    expect(bridge.tasks.create).toHaveBeenCalledTimes(1);
-    expect(bridge.tasks.create).toHaveBeenCalledWith(
-      expect.objectContaining({ title: 'Draft', plannedDate: '2026-10-04' }),
-    );
-    // The new day starts with its task form closed and nothing carried over from the draft.
-    expect(screen.queryByLabelText(/Add a task for this day/)).not.toBeInTheDocument();
-
-    // Discard: the draft is dropped and the day changes without saving.
-    await user.type(await openTaskForm(user), 'Second draft');
-    await user.click(dayButton(/^Friday, October 16, 2026/));
-    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Discard' }));
-    expect(panelDate()).toHaveTextContent('Friday, October 16, 2026');
-    expect(screen.queryByLabelText(/Add a task for this day/)).not.toBeInTheDocument();
-    expect(bridge.tasks.create).toHaveBeenCalledTimes(1);
-  });
-
-  it('stays on the day and keeps the draft when saving from the dialog fails', async () => {
-    const user = userEvent.setup();
-    const { bridge } = installFakeBridge();
-    bridge.tasks.create.mockResolvedValue({
-      ok: false,
-      error: { status: 0, code: 'BACKEND_UNREACHABLE', message: 'The data service did not respond.' },
-    });
-    render(<CalendarPage today="2026-10-04" backendReady />);
-
-    await user.type(await openTaskForm(user), 'Fragile');
-    await user.click(dayButton(/^Thursday, October 15, 2026/));
-    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save' }));
-
-    expect(await screen.findByText(/Not saved/)).toBeInTheDocument();
-    expect(panelDate()).toHaveTextContent('Sunday, October 4, 2026');
-    expect(screen.getByLabelText(/Add a task for this day/)).toHaveValue('Fragile');
   });
 });

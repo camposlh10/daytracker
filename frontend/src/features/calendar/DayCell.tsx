@@ -13,6 +13,8 @@ interface DayCellProps {
   maxVisible: number;
   inMonth: boolean;
   isToday: boolean;
+  /** Before today: shown in the quieter past-day colors. */
+  isPast: boolean;
   isSelected: boolean;
   /** Exactly one day in the grid is in the tab order; arrows move between days. */
   tabbable: boolean;
@@ -26,10 +28,12 @@ export function itemCountLabel(count: number): string {
   return count === 1 ? '1 item' : `${count} items`;
 }
 
-export function DayCell({ date, items, maxVisible, inMonth, isToday, isSelected, tabbable, onSelect }: DayCellProps) {
+export function DayCell({ date, items, maxVisible, inMonth, isToday, isPast, isSelected, tabbable, onSelect }: DayCellProps) {
   const visible = items.slice(0, maxVisible);
   const hidden = items.length - visible.length;
-  const classes = [styles.cell, !inMonth && styles.outside, isSelected && styles.selected].filter(Boolean).join(' ');
+  const classes = [styles.cell, !inMonth && styles.outside, isPast && styles.past, isSelected && styles.selected]
+    .filter(Boolean)
+    .join(' ');
 
   return (
     // Clicking anywhere in the cell, including "+N more", selects the day; the

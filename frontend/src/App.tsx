@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { categoriesApi } from './api/client';
 import type { Category } from './api/bridge';
 import { useBackendState } from './app/useBackendState';
@@ -6,7 +6,7 @@ import { useLoadable } from './app/useLoadable';
 import { useSettings } from './app/useSettings';
 import { useToday } from './app/useToday';
 import { LoadingState } from './components/States';
-import { CalendarPage, type CalendarPageHandle } from './features/calendar/CalendarPage';
+import { CalendarPage } from './features/calendar/CalendarPage';
 import { BackendDownBanner } from './features/lifecycle/BackendDownBanner';
 import { StartupFailure } from './features/lifecycle/StartupFailure';
 import { MiniPlayer, MusicPage } from './features/music/MusicPage';
@@ -38,7 +38,6 @@ export function App() {
   const today = useToday(preferences.settings?.timezone);
   const [view, setView] = useState<View>('calendar');
   const [dataVersion, setDataVersion] = useState(0);
-  const calendar = useRef<CalendarPageHandle>(null);
   // The sidebar spot where the calendar puts its small month.
   const [calendarSlot, setCalendarSlot] = useState<HTMLDivElement | null>(null);
   const categoryList = useLoadable('categories', dataVersion, backend.status === 'ready', () =>
@@ -71,11 +70,6 @@ export function App() {
 
   const dataChanged = () => setDataVersion((version) => version + 1);
 
-  const showToday = () => {
-    setView('calendar');
-    calendar.current?.goToToday();
-  };
-
   return (
     <div className={styles.app}>
       {!backendReady && <BackendDownBanner restarting={backend.status === 'starting'} />}
@@ -99,16 +93,12 @@ export function App() {
           </ul>
           <div ref={setCalendarSlot} className={styles.slot} hidden={view !== 'calendar'} />
           <MiniPlayer spotify={spotify} onOpen={() => setView('music')} />
-          <button type="button" className={styles.navItem} onClick={showToday}>
-            Go to today
-          </button>
         </nav>
         <main className={styles.main}>
           {/* The calendar stays mounted while another view is open, so its
               selected date and any unsaved input are kept. */}
           <div className={styles.view} hidden={view !== 'calendar'}>
             <CalendarPage
-              ref={calendar}
               today={today}
               backendReady={backendReady}
               categories={categories}

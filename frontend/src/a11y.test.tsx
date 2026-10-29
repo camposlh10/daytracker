@@ -43,12 +43,13 @@ describe('Accessibility (automated rules)', () => {
     await expectAccessible();
   });
 
-  it('the calendar with its add forms open has no violations', async () => {
+  it('the daily review dialog has no violations', async () => {
     populated();
     const user = userEvent.setup();
     render(<App />);
-    await user.click(await screen.findByRole('button', { name: '+ Appointment' }));
-    await user.click(await screen.findByRole('button', { name: '+ Review' }));
+    await user.click(await screen.findByRole('button', { name: '+ Create' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Daily review' }));
+    await screen.findByRole('form', { name: 'Daily review' });
 
     await expectAccessible();
   });

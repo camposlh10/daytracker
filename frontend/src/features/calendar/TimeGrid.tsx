@@ -27,8 +27,9 @@ const DAY_MINUTES = 24 * 60;
 const MIN_DRAWN_MINUTES = 20;
 /** New appointments start on the half hour that was clicked. */
 const SNAP_MINUTES = 30;
-const HOUR_HEIGHT = 48;
-const COMPACT_HOUR_HEIGHT = 40;
+/** The zoom levels of the hours, as the height of one hour in pixels. */
+export const HOUR_HEIGHTS = [24, 32, 40, 48, 64, 80, 104, 136, 176];
+export const DEFAULT_ZOOM = HOUR_HEIGHTS.indexOf(48);
 /** Without today on screen, the grid opens at this hour, like a paper planner. */
 const DEFAULT_FIRST_HOUR = 7;
 
@@ -43,6 +44,10 @@ interface TimeGridProps {
   /** An empty part of a day was clicked: start a new appointment there. */
   onCreateAt: (date: IsoDate, minutes: number) => void;
   onOpenEvent: (item: EventItem) => void;
+  /** An index into HOUR_HEIGHTS. */
+  zoom: number;
+  /** Zoom the hours in (1) or out (-1). */
+  onZoom: (direction: 1 | -1) => void;
 }
 
 /** The part of an appointment that falls on one date, in minutes of that day. */
@@ -141,11 +146,16 @@ export function TimeGrid({
   onSelect,
   onCreateAt,
   onOpenEvent,
+  zoom,
+  onZoom,
 }: TimeGridProps) {
   const header = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const compact = useCompactHeight();
-  const hourHeight = compact ? COMPACT_HOUR_HEIGHT : HOUR_HEIGHT;
+  const hourHeight = HOUR_HEIGHTS[zoom];
+  // Where the zoom started, in pixels from the top of the visible hours; the time there stays put.
+  const zoomFocus = useRef<number | null>(null);
+  const previousHeight = useRef(hourHeight);
   const onKeyDown = useGridKeyboard(header, selected, weekStart, 'week', onSelect);
   const now = useNow();
   const single = dates.length === 1;
@@ -158,9 +168,43 @@ export function TimeGrid({
   useLayoutEffect(() => {
     if (body.current) {
       const firstMinute = showsToday ? Math.max(0, minutesOfDay(new Date()) - 90) : DEFAULT_FIRST_HOUR * 60;
-      body.current.scrollTop = (firstMinute / 60) * hourHeight;
+      // On a whole hour, with its label fully in view.
+      body.current.scrollTop = Math.max(0, Math.floor(firstMinute / 60) * hourHeight - 8);
     }
     // Only when the grid first appears; afterwards the user's scroll position is kept.
+  }, []);
+
+  useLayoutEffect(() => {
+    const scroller = body.current;
+    const before = previousHeight.current;
+    previousHeight.current = hourHeight;
+    if (!scroller || before === hourHeight) {
+      return;
+    }
+    const focus = zoomFocus.current ?? scroller.clientHeight / 2;
+    zoomFocus.current = null;
+    scroller.scrollTop = ((scroller.scrollTop + focus) / before) * hourHeight - focus;
+  }, [hourHeight]);
+
+  // Ctrl + mouse wheel zooms around the pointer. A native listener, because the
+  // page must not scroll (or zoom itself) and React's wheel listeners cannot prevent that.
+  const zoomBy = useRef(onZoom);
+  zoomBy.current = onZoom;
+  useEffect(() => {
+    const scroller = body.current;
+    if (!scroller) {
+      return;
+    }
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey || event.deltaY === 0) {
+        return;
+      }
+      event.preventDefault();
+      zoomFocus.current = event.clientY - scroller.getBoundingClientRect().top;
+      zoomBy.current(event.deltaY < 0 ? 1 : -1);
+    };
+    scroller.addEventListener('wheel', onWheel, { passive: false });
+    return () => scroller.removeEventListener('wheel', onWheel);
   }, []);
 
   const createAt = (date: IsoDate, event: MouseEvent<HTMLDivElement>) => {
@@ -178,8 +222,32 @@ export function TimeGrid({
   return (
     <div className={single ? `${styles.grid} ${styles.single}` : styles.grid} style={{ '--columns': dates.length } as CSSProperties}>
       <div className={styles.head}>
-        <div className={styles.zone} aria-hidden="true">
-          {formatZoneOffset(now)}
+        <div className={styles.zone}>
+          <div className={styles.zoom} role="group" aria-label="Zoom the hours">
+            <button
+              type="button"
+              className={styles.zoomButton}
+              aria-label="Zoom out"
+              aria-keyshortcuts="Control+-"
+              title="Zoom out (Ctrl + -)"
+              disabled={zoom === 0}
+              onClick={() => onZoom(-1)}
+            >
+              −
+            </button>
+            <button
+              type="button"
+              className={styles.zoomButton}
+              aria-label="Zoom in"
+              aria-keyshortcuts="Control++"
+              title="Zoom in (Ctrl + +)"
+              disabled={zoom === HOUR_HEIGHTS.length - 1}
+              onClick={() => onZoom(1)}
+            >
+              +
+            </button>
+          </div>
+          <span aria-hidden="true">{formatZoneOffset(now)}</span>
         </div>
         <div ref={header} role="grid" aria-label={label} className={styles.days} onKeyDown={onKeyDown}>
           <div role="row" className={styles.row}>
@@ -190,12 +258,15 @@ export function TimeGrid({
               const hidden = untimed.length - visible.length;
               const isToday = date === today;
               const isSelected = date === selected;
+              const headClasses = [styles.dayHead, date < today && styles.past, isSelected && styles.selected]
+                .filter(Boolean)
+                .join(' ');
               return (
                 <div
                   key={date}
                   role="gridcell"
                   aria-selected={isSelected}
-                  className={isSelected ? `${styles.dayHead} ${styles.selected}` : styles.dayHead}
+                  className={headClasses}
                   onClick={() => onSelect(date)}
                 >
                   <button
@@ -250,22 +321,30 @@ export function TimeGrid({
           </div>
           {dates.map((date) => {
             const timed = (itemsByDate.get(date) ?? NO_ITEMS).filter(isTimed);
+            const columnClasses = [styles.column, date < today && styles.past, date === selected && styles.selectedColumn]
+              .filter(Boolean)
+              .join(' ');
             return (
               <div
                 key={date}
-                className={date === selected ? `${styles.column} ${styles.selectedColumn}` : styles.column}
+                className={columnClasses}
                 data-column={date}
                 onClick={(event) => createAt(date, event)}
               >
                 {layOut(timed, date).map((segment) => {
                   const height = Math.max(segment.end - segment.start, MIN_DRAWN_MINUTES);
                   const times = eventTimes(segment.item as EventItem & { startsAt: string; endsAt: string });
+                  // Over before now: grayed out like the past days.
+                  const over = date < today || (date === today && segment.end <= nowMinutes);
+                  const eventClasses = [styles.event, height < 45 && styles.short, over && styles.over]
+                    .filter(Boolean)
+                    .join(' ');
                   return (
                     <button
                       key={segment.item.id}
                       type="button"
                       tabIndex={-1}
-                      className={height < 45 ? `${styles.event} ${styles.short}` : styles.event}
+                      className={eventClasses}
                       style={{
                         top: (segment.start / 60) * hourHeight,
                         height: (height / 60) * hourHeight - 2,
@@ -285,7 +364,10 @@ export function TimeGrid({
                   );
                 })}
                 {date === today && (
-                  <div className={styles.now} style={{ top: (nowMinutes / 60) * hourHeight }} aria-hidden="true" />
+                  <>
+                    <div className={styles.elapsed} style={{ height: (nowMinutes / 60) * hourHeight }} aria-hidden="true" />
+                    <div className={styles.now} style={{ top: (nowMinutes / 60) * hourHeight }} aria-hidden="true" />
+                  </>
                 )}
               </div>
             );

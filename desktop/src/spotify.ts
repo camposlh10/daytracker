@@ -1,5 +1,7 @@
 import { app, safeStorage, shell } from 'electron';
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { lstat, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { SpotifyClient, type SpotifyStore, type StoredSpotify } from './spotifyClient';
 
@@ -57,9 +59,42 @@ function fileStore(file: string): SpotifyStore {
   };
 }
 
+/**
+ * Starts the Spotify app minimized, so music can play without the user opening it:
+ * the installer's copy, or the Microsoft Store app through its command alias. Any
+ * other install is opened through its spotify: link, which shows its window.
+ */
+async function startSpotify(): Promise<boolean> {
+  const candidates = [
+    process.env.APPDATA && path.join(process.env.APPDATA, 'Spotify', 'Spotify.exe'),
+    process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Microsoft', 'WindowsApps', 'Spotify.exe'),
+  ];
+  for (const candidate of candidates) {
+    // lstat, because the Store alias is a link that cannot be read as a file.
+    if (!candidate || !(await lstat(candidate).then(() => true, () => false))) {
+      continue;
+    }
+    const started = await new Promise<boolean>((resolve) => {
+      const child = spawn(candidate, ['--minimized'], { detached: true, stdio: 'ignore', windowsHide: true });
+      child.once('spawn', () => resolve(true));
+      child.once('error', () => resolve(false));
+      child.unref();
+    });
+    if (started) {
+      return true;
+    }
+  }
+  if (app.getApplicationNameForProtocol('spotify:')) {
+    return shell.openExternal('spotify:').then(() => true, () => false);
+  }
+  return false;
+}
+
 export function createSpotify(userDataDir: string): SpotifyClient {
   return new SpotifyClient({
     store: fileStore(path.join(userDataDir, 'spotify.json')),
+    startSpotify,
+    computerName: os.hostname(),
     openBrowser: async (url) => {
       // Only Spotify's own sign-in page is ever opened.
       if (!url.startsWith(SIGN_IN_PREFIX)) {

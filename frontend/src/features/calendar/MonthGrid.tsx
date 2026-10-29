@@ -60,6 +60,7 @@ export function MonthGrid({ anchor, selected, today, weekStart, itemsByDate, onS
               maxVisible={compact ? COMPACT_VISIBLE_ITEMS : MAX_VISIBLE_ITEMS}
               inMonth={isSameMonth(date, anchor)}
               isToday={date === today}
+              isPast={date < today}
               isSelected={date === selected}
               tabbable={date === tabbableDate}
               onSelect={onSelect}

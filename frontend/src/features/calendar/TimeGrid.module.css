@@ -24,14 +24,46 @@
 }
 
 .zone {
+  display: flex;
   flex: none;
-  align-self: flex-end;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-1);
   width: var(--gutter);
-  padding: var(--space-1) var(--space-2);
+  padding: var(--space-1) var(--space-2) var(--space-1) 0;
   color: var(--color-text-secondary);
   font-size: 0.68rem;
-  text-align: right;
   white-space: nowrap;
+}
+
+.zoom {
+  display: flex;
+  gap: 2px;
+}
+
+.zoomButton {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: var(--color-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text);
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.zoomButton:hover:not(:disabled) {
+  border-color: var(--color-text-secondary);
+}
+
+.zoomButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .days {
@@ -197,6 +229,39 @@
 
 .selectedColumn {
   background-color: color-mix(in srgb, var(--color-primary) 7%, transparent);
+}
+
+/* Days that have passed, and the part of today that has, are grayed out. */
+.dayHead.past .weekday,
+.dayHead.past .number {
+  color: var(--color-text-past);
+}
+
+/* The selected day sits on the lighter surface, so it keeps the normal text color. */
+.dayHead.past.selected .number {
+  color: var(--color-text);
+}
+
+.past .untimed {
+  filter: grayscale(0.8);
+}
+
+.column.past {
+  background-color: var(--color-past);
+}
+
+.elapsed {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  background: color-mix(in srgb, var(--color-past) 70%, transparent);
+  pointer-events: none;
+}
+
+.event.over {
+  filter: grayscale(0.85);
+  color: var(--color-text-past);
 }
 
 .event {

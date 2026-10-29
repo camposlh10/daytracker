@@ -1,4 +1,3 @@
-import { useEffect, useState, type FormEvent, type RefObject } from 'react';
 import type { Book, CalendarEvent, Category, DayDetails, ReadingSession, Task } from '../../api/bridge';
 import type { Loadable } from '../../app/useLoadable';
 import { Button } from '../../components/Button';
@@ -6,13 +5,11 @@ import { formatLongDate, type IsoDate } from '../../lib/dates';
 import { eventWhen } from '../events/eventLabels';
 import { BookCover } from '../reading/BookCover';
 import { pages, sessionSummary } from '../reading/readingLabels';
-import { ReviewForm, type ReviewFields } from '../reviews/ReviewForm';
 import { TaskRow } from '../tasks/TaskRow';
 import styles from './SelectedDayPanel.module.css';
 
 interface SelectedDayPanelProps {
   date: IsoDate;
-  isToday: boolean;
   day: Loadable<DayDetails>;
   categories: Category[];
   /** Current books, to show each reading session with its cover. */
@@ -21,12 +18,6 @@ interface SelectedDayPanelProps {
   /** True while a one-click task change is being saved. */
   actionBusy: boolean;
   actionError: string | null;
-  draftTitle: string;
-  saving: boolean;
-  saveError: string | null;
-  titleInput: RefObject<HTMLInputElement | null>;
-  onDraftChange: (title: string) => void;
-  onSubmit: () => void;
   onToggleDone: (task: Task) => void;
   onOpenTask: (task: Task) => void;
   onMoveToDay: (task: Task) => void;
@@ -34,43 +25,25 @@ interface SelectedDayPanelProps {
   readingBlocked: string | null;
   onAddEvent: () => void;
   onEditEvent: (event: CalendarEvent) => void;
-  review: {
-    values: ReviewFields;
-    dirty: boolean;
-    saving: boolean;
-    error: string | null;
-    /** Why the review cannot be edited right now, or null when it can. */
-    blocked: string | null;
-    onChange: (field: keyof ReviewFields, value: string) => void;
-    onSave: () => void;
-    onDiscard: () => void;
-  };
   onLogReading: () => void;
   onEditSession: (session: ReadingSession) => void;
   onDeleteSession: (session: ReadingSession) => void;
 }
 
 /**
- * Everything about the selected date. Tasks, appointments, and the daily review
- * appear only once there is something in them; until then a "+ Task",
- * "+ Appointment", or "+ Review" button adds the first one. Give the panel a
- * key of the date, so what has been opened is forgotten when the day changes.
+ * What is on the selected date: its tasks and appointments when it has any,
+ * unfinished tasks carried over, and reading. The date itself is the calendar's
+ * title, so it is only announced, not shown. New tasks, appointments and the
+ * daily review come from the calendar's Create menu.
  */
 export function SelectedDayPanel({
   date,
-  isToday,
   day,
   categories,
   books,
   backendReady,
   actionBusy,
   actionError,
-  draftTitle,
-  saving,
-  saveError,
-  titleInput,
-  onDraftChange,
-  onSubmit,
   onToggleDone,
   onOpenTask,
   onMoveToDay,
@@ -80,46 +53,19 @@ export function SelectedDayPanel({
   onDeleteSession,
   onAddEvent,
   onEditEvent,
-  review,
 }: SelectedDayPanelProps) {
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    onSubmit();
-  };
   const controlsDisabled = !backendReady || actionBusy;
   const carryOver = day.status === 'loaded' ? day.data.carryOver : [];
 
-  // What the user has opened on this day; the panel is remounted when the day changes.
-  const [addingTask, setAddingTask] = useState(false);
-  const [writingReview, setWritingReview] = useState(false);
   const loaded = day.status === 'loaded';
   const hasTasks = loaded && day.data.tasks.length > 0;
-  const hasEvents = loaded && day.data.events.length > 0;
-  const hasReview = loaded && day.data.review !== null;
-  const showTasks = hasTasks || addingTask || draftTitle.trim() !== '' || saveError !== null;
-  const showAgenda = hasEvents;
-  const showReview = review.blocked === null && (hasReview || writingReview || review.dirty || review.error !== null);
-  // A review cannot be written for a future day, so no button is offered there.
-  const canAddReview = loaded && review.blocked === null && !showReview;
-
-  useEffect(() => {
-    if (addingTask) {
-      titleInput.current?.focus();
-    }
-  }, [addingTask, titleInput]);
-
-  useEffect(() => {
-    if (writingReview) {
-      document.getElementById('review-wins')?.focus();
-    }
-  }, [writingReview]);
+  const showAgenda = loaded && day.data.events.length > 0;
 
   return (
     <aside className={styles.panel} aria-label="Selected day">
-      <header className={styles.header}>
-        <h2 aria-live="polite">{formatLongDate(date)}</h2>
-        {isToday && <span className={styles.todayBadge}>Today</span>}
-      </header>
+      <h2 className={styles.srOnly} aria-live="polite">
+        {formatLongDate(date)}
+      </h2>
 
       {actionError && (
         <p className={styles.error} role="alert">
@@ -138,71 +84,21 @@ export function SelectedDayPanel({
         </p>
       )}
 
-      {loaded && (!showTasks || !showAgenda || canAddReview) && (
-        <div className={styles.addBar} role="group" aria-label="Add to this day">
-          {!showTasks && (
-            <Button disabled={!backendReady} onClick={() => setAddingTask(true)}>
-              + Task
-            </Button>
-          )}
-          {!showAgenda && (
-            <Button disabled={!backendReady} onClick={onAddEvent}>
-              + Appointment
-            </Button>
-          )}
-          {canAddReview && (
-            <Button disabled={!backendReady} onClick={() => setWritingReview(true)}>
-              + Review
-            </Button>
-          )}
-        </div>
-      )}
-
-      {showTasks && (
+      {hasTasks && (
         <section className={styles.section} aria-labelledby="day-tasks-heading">
           <h3 id="day-tasks-heading">Tasks</h3>
-          {hasTasks && (
-            <ul className={styles.tasks} aria-label="Tasks for this day">
-              {day.data.tasks.map((task) => (
-                <TaskRow
-                  key={task.id}
-                  task={task}
-                  categories={categories}
-                  disabled={controlsDisabled}
-                  onToggleDone={onToggleDone}
-                  onOpen={onOpenTask}
-                />
-              ))}
-            </ul>
-          )}
-
-          <form className={styles.form} onSubmit={submit}>
-            <label className={styles.label} htmlFor="day-task-title">
-              Add a task for this day
-              {draftTitle.trim() !== '' && <span className={styles.unsaved}> · Unsaved</span>}
-            </label>
-            <div className={styles.row}>
-              <input
-                ref={titleInput}
-                id="day-task-title"
-                className={styles.input}
-                value={draftTitle}
-                maxLength={200}
-                placeholder="Task title"
-                aria-invalid={saveError !== null}
-                aria-describedby={saveError ? 'day-task-error' : undefined}
-                onChange={(event) => onDraftChange(event.target.value)}
+          <ul className={styles.tasks} aria-label="Tasks for this day">
+            {day.data.tasks.map((task) => (
+              <TaskRow
+                key={task.id}
+                task={task}
+                categories={categories}
+                disabled={controlsDisabled}
+                onToggleDone={onToggleDone}
+                onOpen={onOpenTask}
               />
-              <Button type="submit" variant="primary" disabled={saving || !backendReady || draftTitle.trim() === ''}>
-                {saving ? 'Saving…' : 'Add'}
-              </Button>
-            </div>
-            {saveError && (
-              <p id="day-task-error" className={styles.error} role="alert">
-                Not saved: {saveError}
-              </p>
-            )}
-          </form>
+            ))}
+          </ul>
         </section>
       )}
 
@@ -330,22 +226,6 @@ export function SelectedDayPanel({
         {readingBlocked && <p className={styles.muted}>{readingBlocked}</p>}
       </section>
 
-      {showReview && (
-        <section className={styles.section} aria-labelledby="day-review-heading">
-          <h3 id="day-review-heading">Daily review</h3>
-          <ReviewForm
-            values={review.values}
-            saved={day.status === 'loaded' ? day.data.review : null}
-            dirty={review.dirty}
-            saving={review.saving}
-            error={review.error}
-            blocked={review.blocked}
-            onChange={review.onChange}
-            onSave={review.onSave}
-            onDiscard={review.onDiscard}
-          />
-        </section>
-      )}
     </aside>
   );
 }

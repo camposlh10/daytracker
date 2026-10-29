@@ -145,7 +145,8 @@ const scenes = [
   { name: 'calendar-day', steps: [{ view: 'Day' }] },
   // The open menu must fit in the window; clicking the button again closes it.
   { name: 'calendar-create-menu', steps: ['+ Create'], after: ['+ Create'] },
-  { name: 'calendar-add-forms', steps: [{ view: 'Month' }, '+ Appointment', '+ Review'] },
+  { name: 'calendar-day-zoomed', steps: [{ view: 'Day' }, '+', '+', '+'], after: ['−', '−', '−'] },
+  { name: 'calendar-back-to-month', steps: [{ view: 'Month' }] },
   { name: 'tasks', nav: 'Tasks', steps: [] },
   { name: 'dialog-new-task', nav: 'Tasks', steps: ['+ New task'], dialog: true },
   { name: 'dialog-categories', nav: 'Tasks', steps: ['Categories'], dialog: true },

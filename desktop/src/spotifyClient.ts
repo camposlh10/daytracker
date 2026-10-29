@@ -28,8 +28,10 @@ import type {
  * Only the refresh token is kept, encrypted by the store.
  *
  * Playback is Spotify Connect: it starts, pauses, and skips on one of the user's
- * Spotify devices (the desktop app, a phone, a speaker). Spotify allows playback
- * control for Premium accounts only.
+ * Spotify devices (the desktop app, a phone, a speaker). When nothing is playing
+ * anywhere, playing picks a device by itself: this computer's Spotify if it is open,
+ * else Spotify started on this computer in the background, else any other open
+ * device. Spotify allows playback control for Premium accounts only.
  */
 
 export interface StoredSpotify {
@@ -84,9 +86,16 @@ export interface SpotifyOptions {
   openBrowser(url: string): Promise<void>;
   /** Makes Windows hand links with this scheme to the app; undefined where that is not possible. */
   registerScheme?(scheme: string): void;
+  /** Starts the Spotify app on this computer in the background; false when it is not installed. */
+  startSpotify?(): Promise<boolean>;
+  /** This computer's name, which Spotify uses for its desktop app's device by default. */
+  computerName?: string;
   accountsBase?: string;
   apiBase?: string;
   loginTimeoutMs?: number;
+  /** How long a just-started Spotify gets to appear as a device. */
+  deviceWaitMs?: number;
+  devicePollMs?: number;
 }
 
 const SCOPES = [
@@ -108,11 +117,14 @@ function fail(status: number, code: string, message: string): ApiResult<never> {
 }
 
 const base64url = (bytes: Buffer) => bytes.toString('base64url');
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class SpotifyClient {
   private readonly accountsBase: string;
   private readonly apiBase: string;
   private readonly loginTimeoutMs: number;
+  private readonly deviceWaitMs: number;
+  private readonly devicePollMs: number;
   private accessToken: string | null = null;
   private expiresAt = 0;
   private displayName: string | null = null;
@@ -124,6 +136,8 @@ export class SpotifyClient {
     this.accountsBase = options.accountsBase ?? 'https://accounts.spotify.com';
     this.apiBase = options.apiBase ?? 'https://api.spotify.com/v1';
     this.loginTimeoutMs = options.loginTimeoutMs ?? 5 * 60_000;
+    this.deviceWaitMs = options.deviceWaitMs ?? 30_000;
+    this.devicePollMs = options.devicePollMs ?? 1_000;
   }
 
   async status(): Promise<ApiResult<SpotifyStatus>> {
@@ -342,7 +356,79 @@ export class SpotifyClient {
       : input.uri
         ? { context_uri: input.uri }
         : undefined;
-    return this.control('PUT', '/me/player/play', body, input.deviceId);
+    const result = await this.control('PUT', '/me/player/play', body, input.deviceId);
+    if (result.ok || input.deviceId || result.error.code !== 'SPOTIFY_NO_DEVICE') {
+      return result;
+    }
+    // Nothing is playing anywhere: wake a device and play there.
+    const device = await this.wakeDevice();
+    if (!device.ok) {
+      return device;
+    }
+    // A device that has just started can take a moment to accept commands.
+    let played = await this.playOn(device.data, body);
+    for (let attempt = 1; attempt < 3 && !played.ok && played.error.code === 'SPOTIFY_NO_DEVICE'; attempt++) {
+      await sleep(this.devicePollMs);
+      played = await this.playOn(device.data, body);
+    }
+    return played;
+  }
+
+  /** Plays the given music on a device, or carries on with the last music there. */
+  private playOn(deviceId: string, body: unknown): Promise<ApiResult<null>> {
+    return body ? this.control('PUT', '/me/player/play', body, deviceId) : this.transfer(deviceId);
+  }
+
+  /**
+   * A device to play on when none is active: this computer's Spotify when it is
+   * open; else Spotify started here in the background; else any open device.
+   */
+  private async wakeDevice(): Promise<ApiResult<string>> {
+    const listed = await this.devices();
+    if (!listed.ok) {
+      return listed;
+    }
+    const here = this.thisComputer(listed.data);
+    if (here) {
+      return { ok: true, data: here.id };
+    }
+    const started = this.options.startSpotify ? await this.options.startSpotify() : false;
+    if (!started) {
+      return listed.data[0]
+        ? { ok: true, data: listed.data[0].id }
+        : fail(
+            404,
+            'SPOTIFY_NO_DEVICE',
+            'Spotify is not installed on this computer. Install the Spotify app and sign in to it once; after that, Day Tracker starts it by itself. Or open Spotify on your phone.',
+          );
+    }
+    const known = new Set(listed.data.map((device) => device.id));
+    const deadline = Date.now() + this.deviceWaitMs;
+    while (Date.now() < deadline) {
+      await sleep(this.devicePollMs);
+      const again = await this.devices();
+      if (!again.ok) {
+        continue;
+      }
+      // Spotify names its desktop device after the computer; a renamed one shows up as new.
+      const appeared =
+        this.thisComputer(again.data) ?? again.data.find((device) => device.type === 'Computer' && !known.has(device.id));
+      if (appeared) {
+        return { ok: true, data: appeared.id };
+      }
+    }
+    return listed.data[0]
+      ? { ok: true, data: listed.data[0].id }
+      : fail(
+          404,
+          'SPOTIFY_NO_DEVICE',
+          'Spotify was started but did not appear. If it asks you to sign in, sign in once with the same account, then press play again.',
+        );
+  }
+
+  private thisComputer(devices: SpotifyDevice[]): SpotifyDevice | undefined {
+    const name = this.options.computerName?.toLowerCase();
+    return name ? devices.find((device) => device.type === 'Computer' && device.name.toLowerCase() === name) : undefined;
   }
 
   pause(): Promise<ApiResult<null>> {
@@ -574,7 +660,7 @@ export class SpotifyClient {
       return fail(403, 'SPOTIFY_PREMIUM_REQUIRED', 'Spotify only allows controlling playback with a Premium account.');
     }
     if (reason === 'NO_ACTIVE_DEVICE' || (response.status === 404 && path.startsWith('/me/player'))) {
-      return fail(404, 'SPOTIFY_NO_DEVICE', 'No Spotify device is active. Open Spotify on this computer or your phone, then try again.');
+      return fail(404, 'SPOTIFY_NO_DEVICE', 'Nothing is playing on Spotify right now. Press play to start it.');
     }
     if (response.status === 403) {
       return fail(

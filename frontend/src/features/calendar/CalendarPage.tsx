@@ -1,6 +1,6 @@
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
 import { createPortal } from 'react-dom';
-import { booksApi, calendarApi, errorMessage, eventsApi, isConflict, progressApi, reviewsApi, tasksApi } from '../../api/client';
+import { booksApi, calendarApi, errorMessage, eventsApi, isConflict, progressApi, reviewsApi } from '../../api/client';
 import type { Book, CalendarItem, Category, DailyReview, ReadingSession } from '../../api/bridge';
 import { useLoadable } from '../../app/useLoadable';
 import { Button } from '../../components/Button';
@@ -21,14 +21,14 @@ import {
 } from '../../lib/dates';
 import { EventDialog, type EventEditorTarget } from '../events/EventDialog';
 import { DeleteSessionDialog, SessionDialog, type SessionEditorTarget } from '../reading/SessionDialog';
-import { EMPTY_REVIEW, type ReviewFields } from '../reviews/ReviewForm';
+import { EMPTY_REVIEW, ReviewForm, type ReviewFields } from '../reviews/ReviewForm';
 import { TaskDialog, type TaskEditorTarget } from '../tasks/TaskDialog';
 import { useTaskActions } from '../tasks/useTaskActions';
 import { MiniMonth } from './MiniMonth';
 import { MonthGrid } from './MonthGrid';
 import { SelectedDayPanel } from './SelectedDayPanel';
 import { WeekSummary } from './WeekSummary';
-import { TimeGrid } from './TimeGrid';
+import { DEFAULT_ZOOM, HOUR_HEIGHTS, TimeGrid } from './TimeGrid';
 import styles from './CalendarPage.module.css';
 
 type CalendarView = 'day' | 'week' | 'month';
@@ -42,12 +42,26 @@ const VIEW_OPTIONS: MenuOption<CalendarView>[] = [
 
 const VIEW_NAMES: Record<CalendarView, string> = { day: 'Day', week: 'Week', month: 'Month' };
 
-type CreateKind = 'task' | 'event';
+type CreateKind = 'task' | 'event' | 'review';
 
 const CREATE_OPTIONS: MenuOption<CreateKind>[] = [
   { id: 'event', label: 'Appointment', shortcut: 'C' },
   { id: 'task', label: 'Task' },
+  { id: 'review', label: 'Daily review' },
 ];
+
+const ZOOM_KEY = 'dayTracker.calendarZoom';
+
+/** The hour zoom chosen last time on this computer, if any. */
+function savedZoom(): number {
+  try {
+    const saved = window.localStorage.getItem(ZOOM_KEY);
+    const zoom = saved === null ? Number.NaN : Number(saved);
+    return Number.isInteger(zoom) && zoom >= 0 && zoom < HOUR_HEIGHTS.length ? zoom : DEFAULT_ZOOM;
+  } catch {
+    return DEFAULT_ZOOM;
+  }
+}
 
 /** Keys that work anywhere on the calendar except while typing or in a dialog. */
 const SHORTCUT_KEYS = new Set(['d', 'w', 'm', 't', 'n', 'j', 'p', 'k', 'c']);
@@ -97,14 +111,8 @@ export function CalendarPage({
   const [changes, setChanges] = useState(0);
   const refresh = changes + dataVersion;
 
-  const [draftTitle, setDraftTitle] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  // The date the user asked for while a draft was unsaved.
+  // The date the user asked for while the review had unsaved edits.
   const [pendingDate, setPendingDate] = useState<IsoDate | null>(null);
-  // The id belongs to the current draft, so retrying it cannot create a duplicate.
-  const draftId = useRef(crypto.randomUUID());
-  const titleInput = useRef<HTMLInputElement>(null);
   const [editor, setEditor] = useState<TaskEditorTarget | null>(null);
   const [sessionEditor, setSessionEditor] = useState<SessionEditorTarget | null>(null);
   const [deletingSession, setDeletingSession] = useState<ReadingSession | null>(null);
@@ -115,7 +123,10 @@ export function CalendarPage({
   const [reviewError, setReviewError] = useState<string | null>(null);
   // The review returned by the last save, used until the reloaded day catches up.
   const [justSaved, setJustSaved] = useState<DailyReview | null>(null);
+  // The review opens in a dialog from the Create menu; closing it keeps any unsaved text.
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(savedZoom);
   const reload = () => setChanges((count) => count + 1);
   const actions = useTaskActions(reload);
 
@@ -150,8 +161,7 @@ export function CalendarPage({
     (reviewDraft.wins !== reviewBaseline.wins ||
       reviewDraft.obstacles !== reviewBaseline.obstacles ||
       reviewDraft.tomorrowPriority !== reviewBaseline.tomorrowPriority);
-  const taskDraftDirty = draftTitle.trim() !== '';
-  const hasUnsavedChanges = taskDraftDirty || reviewDirty;
+  const hasUnsavedChanges = reviewDirty;
 
   // Closing the window with unsaved edits asks first (the main process shows the question).
   useEffect(() => {
@@ -184,12 +194,11 @@ export function CalendarPage({
   const applySelection = (date: IsoDate) => {
     setSelected(date);
     setAnchor(date);
-    setSaveError(null);
     setReviewDraft(null);
     setReviewError(null);
   };
 
-  /** Returns false when the change is waiting on the unsaved-draft dialog. */
+  /** Returns false when the change is waiting on the unsaved-review dialog. */
   const requestSelection = (date: IsoDate): boolean => {
     if (date !== selected && hasUnsavedChanges) {
       setPendingDate(date);
@@ -200,32 +209,6 @@ export function CalendarPage({
   };
 
   useImperativeHandle(ref, () => ({ goToToday: () => void requestSelection(today) }));
-
-  const changeDraft = (title: string) => {
-    setDraftTitle(title);
-    draftId.current = crypto.randomUUID();
-  };
-
-  const saveDraft = async (): Promise<boolean> => {
-    if (saving || !backendReady || draftTitle.trim() === '') {
-      return false;
-    }
-    setSaving(true);
-    setSaveError(null);
-    try {
-      await tasksApi.create({ id: draftId.current, title: draftTitle, plannedDate: selected });
-      setDraftTitle('');
-      draftId.current = crypto.randomUUID();
-      reload();
-      return true;
-    } catch (error) {
-      // The typed title stays in the field so nothing is lost.
-      setSaveError(errorMessage(error));
-      return false;
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const changeReview = (field: keyof ReviewFields, value: string) =>
     setReviewDraft((current) => ({ ...(current ?? reviewBaseline), [field]: value }));
@@ -266,18 +249,19 @@ export function CalendarPage({
 
   const saveAndLeave = async () => {
     const target = pendingDate;
-    const taskSaved = taskDraftDirty ? await saveDraft() : true;
-    const reviewSaved = taskSaved ? await saveReview() : false;
+    const saved = await saveReview();
     setPendingDate(null);
-    if (taskSaved && reviewSaved && target) {
+    if (saved && target) {
       applySelection(target);
+    } else {
+      // Show the review again, with why it was not saved.
+      setReviewOpen(true);
     }
   };
 
   const discardAndLeave = () => {
     const target = pendingDate;
     setPendingDate(null);
-    setDraftTitle('');
     setReviewDraft(null);
     if (target) {
       applySelection(target);
@@ -309,8 +293,15 @@ export function CalendarPage({
     }
   };
 
-  const create = (kind: CreateKind) =>
-    kind === 'task' ? setEditor({ kind: 'create', plannedDate: selected }) : createEventAt(selected);
+  const create = (kind: CreateKind) => {
+    if (kind === 'task') {
+      setEditor({ kind: 'create', plannedDate: selected });
+    } else if (kind === 'review') {
+      setReviewOpen(true);
+    } else {
+      createEventAt(selected);
+    }
+  };
 
   /** An appointment in the time grid was clicked: select its day and open it. */
   const openEvent = async (id: string, date: IsoDate) => {
@@ -331,8 +322,22 @@ export function CalendarPage({
     }
   };
 
+  /** Zooms the hours of the day and week views in (1), out (-1), or back to normal (0). */
+  const changeZoom = (direction: 1 | -1 | 0) => {
+    const next =
+      direction === 0 ? DEFAULT_ZOOM : Math.min(Math.max(zoom + direction, 0), HOUR_HEIGHTS.length - 1);
+    setZoom(next);
+    try {
+      window.localStorage.setItem(ZOOM_KEY, String(next));
+    } catch {
+      // Not remembered; the zoom still applies now.
+    }
+  };
+
   // Single-key shortcuts while the calendar is the page on screen.
   const shortcut = useRef<(key: string) => void>(() => undefined);
+  const viewRef = useRef(view);
+  viewRef.current = view;
   shortcut.current = (key) => {
     if (key === 'd' || key === 'w' || key === 'm') {
       changeView(key === 'd' ? 'day' : key === 'w' ? 'week' : 'month');
@@ -344,6 +349,8 @@ export function CalendarPage({
       step(-1);
     } else if (key === 'c') {
       createEventAt(selected);
+    } else if (key === 'zoom-in' || key === 'zoom-out' || key === 'zoom-reset') {
+      changeZoom(key === 'zoom-in' ? 1 : key === 'zoom-out' ? -1 : 0);
     }
   };
   useEffect(() => {
@@ -351,6 +358,15 @@ export function CalendarPage({
       return;
     }
     const onKeyDown = (event: KeyboardEvent) => {
+      // Ctrl + plus, minus and zero zoom the hours of the day and week views.
+      if (event.ctrlKey && !event.altKey && !event.metaKey && !event.defaultPrevented) {
+        const zoomKey = { '+': 'zoom-in', '=': 'zoom-in', '-': 'zoom-out', _: 'zoom-out', '0': 'zoom-reset' }[event.key];
+        if (zoomKey && viewRef.current !== 'month' && !document.querySelector('[role="dialog"], dialog[open]')) {
+          event.preventDefault();
+          shortcut.current(zoomKey);
+        }
+        return;
+      }
       const key = event.key.toLowerCase();
       if (event.defaultPrevented || event.ctrlKey || event.altKey || event.metaKey || !SHORTCUT_KEYS.has(key)) {
         return;
@@ -457,6 +473,8 @@ export function CalendarPage({
             onSelect={requestSelection}
             onCreateAt={createEventAt}
             onOpenEvent={(item) => void openEvent(item.id, item.date)}
+            zoom={zoom}
+            onZoom={changeZoom}
           />
         )}
 
@@ -466,19 +484,12 @@ export function CalendarPage({
       <SelectedDayPanel
         key={selected}
         date={selected}
-        isToday={selected === today}
         day={day}
         categories={categories}
         books={books}
         backendReady={backendReady}
         actionBusy={actions.busyId !== null}
         actionError={actions.error}
-        draftTitle={draftTitle}
-        saving={saving}
-        saveError={saveError}
-        titleInput={titleInput}
-        onDraftChange={changeDraft}
-        onSubmit={() => void saveDraft()}
         onToggleDone={(task) => void actions.toggleDone(task)}
         onOpenTask={(task) => setEditor({ kind: 'edit', task })}
         onMoveToDay={(task) => void actions.moveTo(task, selected)}
@@ -488,22 +499,34 @@ export function CalendarPage({
         onDeleteSession={setDeletingSession}
         onAddEvent={() => setEventEditor({ kind: 'create', date: selected })}
         onEditEvent={(event) => setEventEditor({ kind: 'edit', event })}
-        review={{
-          values: reviewValues,
-          dirty: reviewDirty,
-          saving: reviewSaving,
-          error: reviewError,
-          blocked:
-            day.status !== 'loaded'
-              ? 'Loading…'
-              : selected > today
-                ? 'A review can be written for today or an earlier day.'
-                : null,
-          onChange: changeReview,
-          onSave: () => void saveReview(),
-          onDiscard: discardReview,
-        }}
       />
+
+      {reviewOpen && (
+        <Dialog
+          title={`Daily review · ${formatLongDate(selected)}`}
+          size="large"
+          onCancel={() => setReviewOpen(false)}
+          actions={<Button onClick={() => setReviewOpen(false)}>Close</Button>}
+        >
+          <ReviewForm
+            values={reviewValues}
+            saved={savedReview}
+            dirty={reviewDirty}
+            saving={reviewSaving}
+            error={reviewError}
+            blocked={
+              day.status !== 'loaded'
+                ? 'Loading…'
+                : selected > today
+                  ? 'A review can be written for today or an earlier day.'
+                  : null
+            }
+            onChange={changeReview}
+            onSave={() => void saveReview()}
+            onDiscard={discardReview}
+          />
+        </Dialog>
+      )}
 
       {sidebarSlot &&
         createPortal(
@@ -564,21 +587,17 @@ export function CalendarPage({
             <>
               <Button
                 variant="primary"
-                disabled={saving || reviewSaving || !backendReady}
+                disabled={reviewSaving || !backendReady}
                 onClick={() => void saveAndLeave()}
               >
-                {saving || reviewSaving ? 'Saving…' : 'Save'}
+                {reviewSaving ? 'Saving…' : 'Save'}
               </Button>
               <Button onClick={discardAndLeave}>Discard</Button>
               <Button onClick={() => setPendingDate(null)}>Cancel</Button>
             </>
           }
         >
-          <p>{formatLongDate(selected)} has changes that are not saved:</p>
-          <ul>
-            {taskDraftDirty && <li>a new task, “{draftTitle.trim()}”</li>}
-            {reviewDirty && <li>the daily review</li>}
-          </ul>
+          <p>The daily review for {formatLongDate(selected)} has changes that are not saved.</p>
           <p>Save them before moving to {formatLongDate(pendingDate)}?</p>
         </Dialog>
       )}
