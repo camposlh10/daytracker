@@ -13,9 +13,12 @@ internet connection needed.
   - Zoom the hours with Ctrl + plus and minus (Ctrl + 0 resets), Ctrl + mouse wheel,
     or the − and + buttons. The zoom is remembered.
   - Days that have passed, and the past hours of today, are grayed out.
-  - The day panel lists the selected day's tasks, appointments, carried-over tasks and
-    reading. New tasks and appointments, and the daily review (today and earlier
+  - The day panel shows reading first, then the selected day's tasks, carried-over
+    tasks and appointments. New tasks and appointments, and the daily review (today and earlier
     days), come from **+ Create**.
+  - Its Reading card always shows the book you are reading: cover, title, author and
+    page. When you read more than one, arrows (or the arrow keys) switch between them,
+    and Log reading starts with the book on show.
   - A small month in the sidebar jumps to any date.
   - Keys: D, W, M for the views, T for today, N and P (or J and K) for the next and
     previous period, C for a new appointment.
@@ -25,16 +28,39 @@ internet connection needed.
   a position kept separate from pages read, and a daily target that applies from a
   chosen date onward.
 - **Appointments**: timed and all-day, shown on every date they cover, overlaps marked.
+  A new one lasts an hour (or one day) unless you switch on **Set an end**; it uses
+  your timezone from Settings, and a description can be added if you want one.
+  An appointment can repeat **every day** (until a last day, or without end), on
+  **days of the week** you press (Mon, Wed, Fri…, also with an optional last day), or
+  on **dates you choose** by pressing them on a small calendar; editing or deleting one
+  changes all its dates. Links can be added and open in your browser.
+- **Holidays**: the public holidays of the country set as your home location in
+  Windows appear on their dates (a gold ★) and in the day panel, from Nager.Date.
+  Only the country and the year are sent; each year's list is kept for 30 days, so it
+  also shows offline. Holidays of only some states are not shown.
 - **Progress**: day, week and month reports computed from the saved records, with the
   records behind each total.
 - **Settings**: name, timezone, first day of the week, 12/24-hour time, reading target.
 - **Music**: connect your own Spotify account and control playback on your Spotify
-  devices: search, play songs and playlists, pause, skip. A player at the bottom of
-  the sidebar shows the song, artist, cover and position, with previous, play or
-  pause, and next. You don't need to open Spotify: when nothing is playing, pressing
+  devices: search, play songs and playlists, pause, skip. **Your library** lists Liked
+  Songs and your playlists; open one to see its songs, play any of them (the list
+  carries on after it) or add it to the queue. Spotify only lists the songs of
+  playlists you made or collaborate on; the ones you follow still play whole.
+  Liked Songs need one reconnect (Disconnect, then Connect) for the new permission. A player bar across the
+  bottom of the window, like Spotify's, shows the song or podcast episode, artist or
+  show, cover, device and position, with shuffle, previous, play or pause, next,
+  repeat, a bar to jump within the song, and volume (15-second skips for episodes). You don't need to open Spotify: when nothing is playing, pressing
   play starts the Spotify app on this computer minimized and plays there (it must be
   installed and signed in once). Needs Premium for playback control and a one-time
   setup in the Spotify developer dashboard (see the README).
+- **Window**: opens about as large as Spotify's desktop app the first time, then where
+  and how large you last left it. Its own dark title bar, like Spotify's, has a ⋯ menu with every
+  screen, back and forward (also Alt+Left and Alt+Right), and a profile button for
+  Settings. The sidebar shows the app's icon and a greeting for the time of day
+  (good morning, good afternoon or good night) with your name, and the weather where
+  you are now. The weather uses Windows' location (Settings, Privacy & security,
+  Location) and Open-Meteo; only coordinates rounded to about a kilometre are sent,
+  at most every 15 minutes; click the temperature to switch °C and °F. Scroll bars are hidden; everything still scrolls.
 - **Data tools**: checked backups (manual, daily automatic, before an upgrade, before a
   restore), restore from a file, and CSV exports.
 
@@ -72,7 +98,8 @@ Windows account's file permissions.
 
 - Windows 11 x64 only. Other systems need separate packaging and testing.
 - Book suggestions and covers contact Open Library and Google Books, and the Music
-  screen contacts Spotify, only when you use them; everything else works offline.
+  screen contacts Spotify, only when you use them. The sidebar's weather contacts
+  Open-Meteo with your approximate location; everything else works offline.
 - Music plays on a Spotify device (the Spotify app, a phone), not inside Day Tracker:
   in-app playback would need a DRM-enabled browser engine that this build does not have.
   Day Tracker starts the installed Spotify app in the background when needed.

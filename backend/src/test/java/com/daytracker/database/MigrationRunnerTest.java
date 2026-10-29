@@ -9,7 +9,9 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 import com.zaxxer.hikari.HikariDataSource;
@@ -177,10 +179,23 @@ class MigrationRunnerTest {
 		jdbc.sql("INSERT INTO settings (key, value, updated_at) VALUES ('timezone', 'America/Sao_Paulo', 'now')").update();
 	}
 
-	private List<String> everythingStored() {
-		return Stream.of("categories", "tasks", "task_activity", "books", "reading_sessions", "reading_goals",
-				"calendar_events", "daily_reviews", "settings")
-			.map(table -> table + ": " + jdbc.sql("SELECT * FROM " + table + " ORDER BY 1").query((rs, row) -> {
+	private static final List<String> FIRST_RELEASE_TABLES = List.of("categories", "tasks", "task_activity", "books",
+			"reading_sessions", "reading_goals", "calendar_events", "daily_reviews", "settings");
+
+	/** Each table's columns as they are now, so later columns can be left out of a comparison. */
+	private Map<String, String> currentColumns() {
+		Map<String, String> columns = new LinkedHashMap<>();
+		for (String table : FIRST_RELEASE_TABLES) {
+			columns.put(table, String.join(", ",
+					jdbc.sql("SELECT name FROM pragma_table_info('" + table + "') ORDER BY cid").query(String.class).list()));
+		}
+		return columns;
+	}
+
+	/** Every row of the given columns; columns added by later migrations are not compared. */
+	private List<String> everythingStored(Map<String, String> columns) {
+		return FIRST_RELEASE_TABLES.stream()
+			.map(table -> table + ": " + jdbc.sql("SELECT " + columns.get(table) + " FROM " + table + " ORDER BY 1").query((rs, row) -> {
 				StringBuilder line = new StringBuilder();
 				for (int column = 1; column <= rs.getMetaData().getColumnCount(); column++) {
 					line.append(rs.getString(column)).append('|');
@@ -197,11 +212,12 @@ class MigrationRunnerTest {
 				shipped.stream().filter(script -> script.version() == 1).toList())
 			.migrate();
 		populateVersionOne();
-		List<String> before = everythingStored();
+		Map<String, String> firstColumns = currentColumns();
+		List<String> before = everythingStored(firstColumns);
 
 		new MigrationRunner(dataSource, tempDir.resolve("backups"), CLOCK, shipped).migrate();
 
-		assertThat(everythingStored()).isEqualTo(before);
+		assertThat(everythingStored(firstColumns)).isEqualTo(before);
 		assertThat(jdbc.sql("PRAGMA integrity_check").query(String.class).single()).isEqualTo("ok");
 		assertThat(jdbc.sql("PRAGMA foreign_key_check").query((rs, row) -> rs.getString(1)).list()).isEmpty();
 		assertThat(appliedVersions()).containsExactly(shipped.stream().map(MigrationScript::version).toArray(Integer[]::new));
@@ -212,7 +228,8 @@ class MigrationRunnerTest {
 		List<MigrationScript> shipped = MigrationScript.loadAll(DatabaseConfig.MIGRATION_LOCATION);
 		new MigrationRunner(dataSource, tempDir.resolve("backups"), CLOCK, shipped).migrate();
 		populateVersionOne();
-		List<String> before = everythingStored();
+		Map<String, String> columns = currentColumns();
+		List<String> before = everythingStored(columns);
 		int next = shipped.stream().mapToInt(MigrationScript::version).max().orElseThrow() + 1;
 		MigrationScript broken = MigrationScript.fromFile("V%03d__broken.sql".formatted(next),
 				"DELETE FROM tasks;\nINSERT INTO missing_table (id) VALUES (1);\n");
@@ -221,7 +238,7 @@ class MigrationRunnerTest {
 		assertThatThrownBy(() -> new MigrationRunner(dataSource, tempDir.resolve("backups"), CLOCK, withBroken).migrate())
 			.isInstanceOf(MigrationException.class);
 
-		assertThat(everythingStored()).isEqualTo(before);
+		assertThat(everythingStored(columns)).isEqualTo(before);
 		try (Stream<Path> backups = Files.list(tempDir.resolve("backups"))) {
 			Path backup = backups.filter(path -> path.getFileName().toString().startsWith("pre-migration-"))
 				.findFirst()

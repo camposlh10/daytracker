@@ -256,8 +256,61 @@ describe('CalendarPage navigation', () => {
     const dialog = await screen.findByRole('dialog', { name: 'New appointment' });
     expect(within(dialog).getByLabelText('Start date')).toHaveValue('2026-09-29');
     expect(within(dialog).getByLabelText('Start time')).toHaveValue('14:30');
+    await user.click(within(dialog).getByRole('switch', { name: 'Set an end' }));
     expect(within(dialog).getByLabelText('End time')).toHaveValue('15:30');
     expect(panelDate()).toHaveTextContent('Tuesday, September 29, 2026');
+  });
+
+  it('shows the holidays on their dates and in the day panel', async () => {
+    const user = userEvent.setup();
+    const { bridge } = installFakeBridge();
+    bridge.holidays.list.mockImplementation(async (year: number) => ({
+      ok: true,
+      data:
+        year === 2026
+          ? [
+              { date: '2026-10-12', name: 'Children\'s Day', localName: 'Nossa Senhora Aparecida' },
+              { date: '2026-11-02', name: 'All Souls\' Day', localName: 'Finados' },
+            ]
+          : [],
+    }));
+    render(<CalendarPage today="2026-10-04" backendReady />);
+
+    const cell = (await screen.findByRole('button', { name: /^Monday, October 12, 2026/ })).closest('[role="gridcell"]') as HTMLElement;
+    expect(await within(cell).findByText("Children's Day")).toBeInTheDocument();
+    expect(within(cell).getByText("Children's Day").closest('[title]')).toHaveAttribute(
+      'title',
+      "Children's Day (Nossa Senhora Aparecida)",
+    );
+    expect(bridge.holidays.list).toHaveBeenCalledWith(2026);
+
+    await user.click(screen.getByRole('button', { name: /^Monday, October 12, 2026/ }));
+    const panel = screen.getByRole('complementary', { name: 'Selected day' });
+    expect(within(panel).getByText(/Children's Day/)).toHaveTextContent("Holiday: Children's Day · Nossa Senhora Aparecida");
+  });
+
+  it('shows how an appointment repeats and opens its links in the browser', async () => {
+    const user = userEvent.setup();
+    const { bridge } = installFakeBridge();
+    const standUp = calendarEvent({
+      title: 'Stand-up',
+      repeat: 'DAILY',
+      repeatUntil: '2026-10-31',
+      links: ['https://meet.example.com/abc'],
+    });
+    bridge.calendar.getDay.mockResolvedValue({ ok: true, data: { ...emptyDay('2026-10-04'), events: [standUp] } });
+    bridge.events.get.mockResolvedValue({ ok: true, data: standUp });
+    render(<CalendarPage today="2026-10-04" backendReady />);
+
+    const agenda = await screen.findByRole('list', { name: 'Appointments for this day' });
+    expect(agenda).toHaveTextContent('Every day until Oct 31');
+    await user.click(within(agenda).getByRole('link', { name: 'meet.example.com' }));
+    expect(bridge.app.openLink).toHaveBeenCalledWith('https://meet.example.com/abc');
+
+    // Editing opens the stored appointment, not this day's occurrence.
+    await user.click(within(agenda).getByRole('button', { name: 'Edit appointment Stand-up' }));
+    expect(await screen.findByRole('dialog', { name: 'Edit appointment' })).toBeInTheDocument();
+    expect(bridge.events.get).toHaveBeenCalledWith(standUp.id);
   });
 
   it('opens an appointment from the time grid', async () => {
@@ -267,7 +320,7 @@ describe('CalendarPage navigation', () => {
     bridge.calendar.getRange.mockImplementation(
       rangeOf([eventItem('2026-10-04', 'Dentist', dentist.startsAt!, dentist.endsAt!, { id: dentist.id })]),
     );
-    bridge.events.list.mockResolvedValue({ ok: true, data: [dentist] });
+    bridge.events.get.mockResolvedValue({ ok: true, data: dentist });
     render(<CalendarPage today="2026-10-04" backendReady />);
     await chooseView(user, 'Day');
 
@@ -275,7 +328,8 @@ describe('CalendarPage navigation', () => {
 
     const dialog = await screen.findByRole('dialog', { name: 'Edit appointment' });
     expect(within(dialog).getByLabelText('Title')).toHaveValue('Dentist');
-    expect(bridge.events.list).toHaveBeenCalledWith({ from: '2026-10-04', to: '2026-10-05' });
+    // The appointment as stored, so a repeating one is edited from its first date.
+    expect(bridge.events.get).toHaveBeenCalledWith(dentist.id);
   });
 
   it('zooms the hours with Ctrl + plus and minus, remembers it, and resets with Ctrl + 0', async () => {

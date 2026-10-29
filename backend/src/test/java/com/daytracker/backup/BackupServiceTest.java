@@ -96,7 +96,7 @@ class BackupServiceTest {
 
 		assertThat(info.kind()).isEqualTo(Kind.MANUAL);
 		assertThat(info.verified()).isTrue();
-		assertThat(info.schemaVersion()).isEqualTo(3);
+		assertThat(info.schemaVersion()).isEqualTo(5);
 		assertThat(info.appVersion()).isEqualTo("1.2.3");
 		assertThat(info.sizeBytes()).isPositive();
 		Path file = properties.backupsDir().resolve(info.name());
@@ -194,8 +194,8 @@ class BackupServiceTest {
 
 		BackupService.RestoreCheck check = backups.validateStaged("staged-1.db");
 
-		assertThat(check.schemaVersion()).isEqualTo(3);
-		assertThat(check.newestKnownVersion()).isEqualTo(3);
+		assertThat(check.schemaVersion()).isEqualTo(5);
+		assertThat(check.newestKnownVersion()).isEqualTo(5);
 		assertThat(check.counts()).containsEntry("tasks", 1L).containsEntry("books", 0L);
 	}
 

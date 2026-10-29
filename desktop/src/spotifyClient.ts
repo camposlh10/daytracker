@@ -7,9 +7,11 @@ import type {
   SpotifyPlayback,
   SpotifyPlayInput,
   SpotifyPlaylist,
+  SpotifyRepeat,
   SpotifySearchResult,
   SpotifyStatus,
   SpotifyTrack,
+  SpotifyTrackPage,
 } from './shared/bridge-types';
 
 /**
@@ -103,12 +105,15 @@ const SCOPES = [
   'user-modify-playback-state',
   'user-read-currently-playing',
   'playlist-read-private',
+  'playlist-read-collaborative',
+  'user-library-read',
 ].join(' ');
 const CLIENT_ID = /^[0-9a-fA-F]{32}$/;
 const IMAGE_URL = /^https:\/\/i\.scdn\.co\/image\/([0-9a-f]{40})$/;
 const REQUEST_TIMEOUT_MS = 10_000;
 // Development-mode apps may ask for at most 10 search results.
 const SEARCH_LIMIT = 10;
+const PAGE_SIZE = 50;
 
 type Json = Record<string, unknown>;
 
@@ -302,7 +307,7 @@ export class SpotifyClient {
   }
 
   async playlists(): Promise<ApiResult<SpotifyPlaylist[]>> {
-    const result = await this.api('GET', '/me/playlists', { query: { limit: '30' } });
+    const result = await this.api('GET', '/me/playlists', { query: { limit: '50' } });
     if (!result.ok) {
       return result;
     }
@@ -330,7 +335,8 @@ export class SpotifyClient {
   }
 
   async playback(): Promise<ApiResult<SpotifyPlayback | null>> {
-    const result = await this.api('GET', '/me/player');
+    // Without additional_types, a podcast episode comes back as nothing.
+    const result = await this.api('GET', '/me/player', { query: { additional_types: 'track,episode' } });
     if (!result.ok) {
       return result;
     }
@@ -339,23 +345,71 @@ export class SpotifyClient {
     }
     const data = result.data as Json;
     const device = data.device as Json | undefined;
+    const volume = device?.volume_percent;
     return {
       ok: true,
       data: {
         isPlaying: data.is_playing === true,
         progressMs: typeof data.progress_ms === 'number' ? data.progress_ms : 0,
-        track: toTrack(data.item),
+        track: toTrack(data.item) ?? toEpisode(data.item),
         deviceName: device && typeof device.name === 'string' ? device.name : null,
+        volumePercent: typeof volume === 'number' && device?.supports_volume !== false ? volume : null,
+        shuffle: data.shuffle_state === true,
+        repeat: data.repeat_state === 'context' || data.repeat_state === 'track' ? data.repeat_state : 'off',
       },
     };
   }
 
+  /**
+   * A page of a playlist's songs. Since February 2026 Spotify lists only playlists
+   * the user made or collaborates on to apps in development mode.
+   */
+  async playlistItems(playlistId: string, offset = 0): Promise<ApiResult<SpotifyTrackPage>> {
+    const result = await this.api('GET', `/playlists/${playlistId}/items`, {
+      query: { limit: String(PAGE_SIZE), offset: String(offset), additional_types: 'track,episode' },
+    });
+    if (!result.ok) {
+      return result.error.status === 403 || result.error.status === 404
+        ? fail(
+            403,
+            'SPOTIFY_PLAYLIST_HIDDEN',
+            'Spotify only lists the songs of playlists you made or collaborate on. This one can still be played.',
+          )
+        : result;
+    }
+    return { ok: true, data: toPage(result.data, offset) };
+  }
+
+  /** A page of Liked Songs, newest first. */
+  async likedSongs(offset = 0): Promise<ApiResult<SpotifyTrackPage>> {
+    const result = await this.api('GET', '/me/tracks', { query: { limit: String(PAGE_SIZE), offset: String(offset) } });
+    if (!result.ok) {
+      // Connections made before Liked Songs were shown lack that permission.
+      return result.error.status === 403 || result.error.status === 401
+        ? fail(403, 'SPOTIFY_RECONNECT', 'To show Liked Songs, Spotify needs your permission: disconnect and connect again on the Music page.')
+        : result;
+    }
+    return { ok: true, data: toPage(result.data, offset) };
+  }
+
+  /** Adds a song to what plays next on the active device. */
+  queue(uri: string): Promise<ApiResult<null>> {
+    return this.control('POST', '/me/player/queue', undefined, undefined, { uri });
+  }
+
   async play(input: SpotifyPlayInput = {}): Promise<ApiResult<null>> {
-    const body = input.uri?.startsWith('spotify:track:')
-      ? { uris: [input.uri] }
-      : input.uri
-        ? { context_uri: input.uri }
-        : undefined;
+    const song = input.uri?.startsWith('spotify:track:') || input.uri?.startsWith('spotify:episode:');
+    // A song inside a list keeps playing the rest of the list after it.
+    const body =
+      input.uris && input.uris.length > 0
+        ? { uris: input.uris, ...(song ? { offset: { uri: input.uri } } : {}) }
+        : input.contextUri
+          ? { context_uri: input.contextUri, ...(song ? { offset: { uri: input.uri } } : {}) }
+          : song
+            ? { uris: [input.uri] }
+            : input.uri
+              ? { context_uri: input.uri }
+              : undefined;
     const result = await this.control('PUT', '/me/player/play', body, input.deviceId);
     if (result.ok || input.deviceId || result.error.code !== 'SPOTIFY_NO_DEVICE') {
       return result;
@@ -443,12 +497,35 @@ export class SpotifyClient {
     return this.control('POST', '/me/player/previous');
   }
 
+  seek(positionMs: number): Promise<ApiResult<null>> {
+    return this.control('PUT', '/me/player/seek', undefined, undefined, { position_ms: String(positionMs) });
+  }
+
+  volume(percent: number): Promise<ApiResult<null>> {
+    return this.control('PUT', '/me/player/volume', undefined, undefined, { volume_percent: String(percent) });
+  }
+
+  shuffle(on: boolean): Promise<ApiResult<null>> {
+    return this.control('PUT', '/me/player/shuffle', undefined, undefined, { state: String(on) });
+  }
+
+  repeat(mode: SpotifyRepeat): Promise<ApiResult<null>> {
+    return this.control('PUT', '/me/player/repeat', undefined, undefined, { state: mode });
+  }
+
   transfer(deviceId: string): Promise<ApiResult<null>> {
     return this.control('PUT', '/me/player', { device_ids: [deviceId], play: true });
   }
 
-  private async control(method: string, path: string, body?: unknown, deviceId?: string): Promise<ApiResult<null>> {
-    const result = await this.api(method, path, { body, query: deviceId ? { device_id: deviceId } : undefined });
+  private async control(
+    method: string,
+    path: string,
+    body?: unknown,
+    deviceId?: string,
+    query: Record<string, string> = {},
+  ): Promise<ApiResult<null>> {
+    const all = deviceId ? { ...query, device_id: deviceId } : query;
+    const result = await this.api(method, path, { body, query: Object.keys(all).length > 0 ? all : undefined });
     return result.ok ? { ok: true, data: null } : result;
   }
 
@@ -696,12 +773,48 @@ function toTrack(value: unknown): SpotifyTrack | null {
   const album = track.album as Json | undefined;
   return {
     uri: track.uri,
+    kind: 'track',
     name: String(track.name ?? ''),
     artists: artists.filter(Boolean).join(', '),
     album: album ? String(album.name ?? '') : '',
     durationMs: typeof track.duration_ms === 'number' ? track.duration_ms : 0,
     imageId: imageIdOf(album?.images),
   };
+}
+
+/** A podcast episode, shown like a song: its show stands in for the artist and album. */
+function toEpisode(value: unknown): SpotifyTrack | null {
+  const episode = value as Json | null;
+  if (!episode || episode.type !== 'episode' || typeof episode.uri !== 'string') {
+    return null;
+  }
+  const show = episode.show as Json | undefined;
+  const showName = show ? String(show.name ?? show.publisher ?? '') : '';
+  return {
+    uri: episode.uri,
+    kind: 'episode',
+    name: String(episode.name ?? ''),
+    artists: showName,
+    album: showName,
+    durationMs: typeof episode.duration_ms === 'number' ? episode.duration_ms : 0,
+    imageId: imageIdOf(episode.images) ?? imageIdOf(show?.images),
+  };
+}
+
+/**
+ * A page of songs: playlist entries carry the song in "item" (the February 2026
+ * name) or "track" (before); Liked Songs in "track". Songs Spotify cannot play here
+ * come back as null and are left out.
+ */
+function toPage(value: unknown, offset: number): SpotifyTrackPage {
+  const data = (value ?? {}) as Json;
+  const entries = Array.isArray(data.items) ? (data.items as Json[]) : [];
+  const tracks = entries
+    .map((entry) => entry?.item ?? entry?.track)
+    .map((item) => toTrack(item) ?? toEpisode(item))
+    .filter((track): track is SpotifyTrack => track !== null);
+  const total = typeof data.total === 'number' ? data.total : offset + entries.length;
+  return { tracks, total, nextOffset: data.next ? offset + entries.length : null };
 }
 
 function toPlaylist(value: unknown): SpotifyPlaylist | null {

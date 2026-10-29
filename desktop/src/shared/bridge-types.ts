@@ -264,6 +264,19 @@ export interface CalendarEvent {
   localEnd: string | null;
   startDate: string | null;
   endDateExclusive: string | null;
+  /**
+   * Null for a one-off; DAILY repeats every day until repeatUntil (or without end);
+   * WEEKLY the same but only on repeatWeekdays (the first date is one of them);
+   * DATES repeats on repeatDates, the first being its own date. A range list
+   * returns each occurrence with its own times; get returns the stored first one.
+   */
+  repeat: EventRepeat | null;
+  repeatUntil: string | null;
+  repeatDates: string[];
+  /** WEEKLY only, Monday first. */
+  repeatWeekdays: Weekday[];
+  /** Web addresses (http or https). */
+  links: string[];
   /** True when a timed event overlaps another one. Overlaps are allowed. */
   overlapsAnother: boolean;
   createdAt: string;
@@ -286,6 +299,25 @@ export interface EventFields {
   timezone?: string;
   startDate?: string;
   endDateExclusive?: string;
+  repeat?: EventRepeat | null;
+  repeatUntil?: string | null;
+  repeatDates?: string[];
+  repeatWeekdays?: Weekday[];
+  links?: string[];
+}
+
+export type EventRepeat = 'DAILY' | 'WEEKLY' | 'DATES';
+
+export type Weekday = 'MONDAY' | 'TUESDAY' | 'WEDNESDAY' | 'THURSDAY' | 'FRIDAY' | 'SATURDAY' | 'SUNDAY';
+
+/** A public holiday of the home country. */
+export interface Holiday {
+  /** YYYY-MM-DD */
+  date: string;
+  /** In English. */
+  name: string;
+  /** In the country's own language. */
+  localName: string;
 }
 
 export type CreateEventInput = EventFields & { id: string };
@@ -512,9 +544,11 @@ export interface SpotifyStatus {
   displayName: string | null;
 }
 
+/** A song, or a podcast episode (its show stands in for the artist and album). */
 export interface SpotifyTrack {
-  /** spotify:track:... */
+  /** spotify:track:... or spotify:episode:... */
   uri: string;
+  kind: 'track' | 'episode';
   name: string;
   artists: string;
   album: string;
@@ -548,16 +582,36 @@ export interface SpotifyDevice {
 export interface SpotifyPlayback {
   isPlaying: boolean;
   progressMs: number;
-  /** Null for podcasts and when nothing is loaded. */
+  /** Null for ads and when nothing is loaded. */
   track: SpotifyTrack | null;
   deviceName: string | null;
+  /** Null when the device does not allow changing its volume. */
+  volumePercent: number | null;
+  shuffle: boolean;
+  repeat: SpotifyRepeat;
 }
 
+/** Repeat nothing, the playlist or album, or the one song. */
+export type SpotifyRepeat = 'off' | 'context' | 'track';
+
 export interface SpotifyPlayInput {
-  /** A track, album, playlist, or artist URI; omitted to resume. */
+  /** A track, episode, album, playlist, or artist URI; omitted to resume. */
   uri?: string;
+  /** With a song in uri: play that song inside this playlist or album, which then carries on. */
+  contextUri?: string;
+  /** With a song in uri: play these songs, starting at that one (for Liked Songs, which have no context). */
+  uris?: string[];
   /** Play on this device instead of the active one. */
   deviceId?: string;
+}
+
+/** A page of songs from a playlist or from Liked Songs. */
+export interface SpotifyTrackPage {
+  tracks: SpotifyTrack[];
+  /** How many there are in all. */
+  total: number;
+  /** Where the next page starts, or null on the last page. */
+  nextOffset: number | null;
 }
 
 export interface ApiFieldError {
@@ -577,6 +631,18 @@ export interface ApiErrorBody {
 // Errors cross IPC as data; a thrown error would lose its structure.
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: ApiErrorBody };
 
+/** The weather now where this computer is. */
+export interface Weather {
+  /** In degrees Celsius, to one decimal. */
+  temperatureC: number;
+  /** What Windows' regional format measures in: F for the US system, C otherwise. */
+  preferredUnit: 'C' | 'F';
+  /** WMO weather interpretation code, as Open-Meteo reports it. */
+  code: number;
+  /** False at night, for a moon instead of a sun. */
+  isDay: boolean;
+}
+
 export interface DayTrackerBridge {
   backend: {
     getState(): Promise<BackendState>;
@@ -587,6 +653,8 @@ export interface DayTrackerBridge {
   app: {
     openDiagnostics(): Promise<void>;
     exit(): Promise<void>;
+    /** Opens an http or https address in the default browser. */
+    openLink(url: string): Promise<ApiResult<null>>;
   };
   calendar: {
     /** At most 93 days. */
@@ -640,6 +708,8 @@ export interface DayTrackerBridge {
   events: {
     /** Events appearing on any date in the range; at most 93 days. */
     list(query: DateRangeQuery): Promise<ApiResult<CalendarEvent[]>>;
+    /** The event as stored: a repeating one with its first occurrence. */
+    get(id: string): Promise<ApiResult<CalendarEvent>>;
     create(input: CreateEventInput): Promise<ApiResult<CalendarEvent>>;
     update(id: string, input: UpdateEventInput): Promise<ApiResult<CalendarEvent>>;
     delete(id: string, version: number): Promise<ApiResult<null>>;
@@ -708,10 +778,40 @@ export interface DayTrackerBridge {
     devices(): Promise<ApiResult<SpotifyDevice[]>>;
     /** Null when nothing is playing on any device. */
     playback(): Promise<ApiResult<SpotifyPlayback | null>>;
+    /**
+     * The songs of a playlist the user made or collaborates on; Spotify does not
+     * list others' playlists to apps (code SPOTIFY_PLAYLIST_HIDDEN), though they play.
+     */
+    playlistItems(playlistId: string, offset?: number): Promise<ApiResult<SpotifyTrackPage>>;
+    /** Liked Songs; code SPOTIFY_RECONNECT when the connection predates that permission. */
+    likedSongs(offset?: number): Promise<ApiResult<SpotifyTrackPage>>;
+    /** Adds a song to what plays next. */
+    queue(uri: string): Promise<ApiResult<null>>;
     play(input?: SpotifyPlayInput): Promise<ApiResult<null>>;
     pause(): Promise<ApiResult<null>>;
     next(): Promise<ApiResult<null>>;
     previous(): Promise<ApiResult<null>>;
+    /** Jumps to a point in what is playing, in milliseconds from its start. */
+    seek(positionMs: number): Promise<ApiResult<null>>;
+    /** 0 to 100. */
+    volume(percent: number): Promise<ApiResult<null>>;
+    shuffle(on: boolean): Promise<ApiResult<null>>;
+    repeat(mode: SpotifyRepeat): Promise<ApiResult<null>>;
     transfer(deviceId: string): Promise<ApiResult<null>>;
+  };
+  /**
+   * The weather here, from Windows' location and Open-Meteo, at most every 15
+   * minutes. Errors use codes LOCATION_OFF, LOCATION_UNKNOWN and WEATHER_UNAVAILABLE.
+   */
+  weather: {
+    current(): Promise<ApiResult<Weather>>;
+  };
+  /**
+   * Public holidays of the country set as home location in Windows, from
+   * Nager.Date, kept on disk for 30 days. Error codes COUNTRY_UNKNOWN and
+   * HOLIDAYS_UNAVAILABLE.
+   */
+  holidays: {
+    list(year: number): Promise<ApiResult<Holiday[]>>;
   };
 }

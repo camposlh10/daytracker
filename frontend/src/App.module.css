@@ -1,7 +1,9 @@
+/* Below the title bar, filling the rest of the window. */
 .centered {
   display: grid;
+  flex: 1;
   place-items: center;
-  height: 100%;
+  min-height: 0;
 }
 
 .app {
@@ -13,7 +15,7 @@
 .shell {
   display: grid;
   flex: 1;
-  grid-template-columns: 208px minmax(0, 1fr);
+  grid-template-columns: 256px minmax(0, 1fr);
   min-height: 0;
 }
 
@@ -27,15 +29,27 @@
   border-right: 1px solid var(--color-border);
 }
 
+/* The logo, the name, a greeting and the weather, with a line below across the sidebar. */
 .brand {
-  padding: 0 var(--space-3);
-  font-size: 1.1rem;
-  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: 0 calc(var(--space-3) * -1);
+  padding: 0 calc(var(--space-3) + var(--space-2)) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
 }
 
-.user {
-  margin-top: calc(var(--space-3) * -1);
-  padding: 0 var(--space-3);
+.brandText {
+  min-width: 0;
+}
+
+.name {
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.greeting {
   overflow: hidden;
   color: var(--color-text-secondary);
   font-size: 0.85rem;
@@ -43,39 +57,7 @@
   white-space: nowrap;
 }
 
-.nav {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.navItem {
-  width: 100%;
-  padding: var(--space-2) var(--space-3);
-  background: none;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  color: var(--color-text-secondary);
-  font-weight: 600;
-  text-align: left;
-  cursor: pointer;
-}
-
-.navItem:hover {
-  background: var(--color-surface);
-  color: var(--color-text);
-}
-
-.navItem[aria-current='page'] {
-  background: var(--color-elevated);
-  border-color: var(--color-border);
-  color: var(--color-text);
-}
-
-/* The calendar's small month; it also pushes the player and "Go to today" to the bottom. */
+/* The calendar's small month. */
 .slot {
   flex: 1;
 }

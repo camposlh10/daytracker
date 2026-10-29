@@ -154,6 +154,27 @@ Google Books addresses over HTTPS, checks that what it receives really is an ima
 passes images to the window through a private `dt-cover:` scheme, so the
 window itself still has no network access.
 
+## Weather
+
+The sidebar shows the weather where this computer is. Windows supplies the location
+(Settings, Privacy & security, Location; it must be on for desktop apps), and the
+main process asks Open-Meteo (open-meteo.com, no account) for the current conditions,
+at most every 15 minutes. Only the coordinates, rounded to two decimals (about a
+kilometre), are sent. The temperature starts in °F when Windows' regional format uses
+US measurements and in °C otherwise; click it to switch, and the choice is kept.
+With location off, the sidebar says so; offline, it shows nothing.
+The pictures are the 32 × 32 pixel-art set in `frontend/src/assets/weather`: animated
+GIFs, and their still first frames when Windows is set to show fewer animations. The
+set has no night or fog pictures, so clear nights show the sun and fog shows a cloud.
+
+## Holidays
+
+The calendar shows the public holidays of the country set as home location in Windows
+(Settings, Time & language, Language & region, Country or region). The main process
+asks Nager.Date (date.nager.at, no account) for a year's list, sending only the year
+and the two-letter country, and keeps it in `%APPDATA%\Day Tracker\holidays` for 30
+days. Holidays that apply only in some states or regions are left out.
+
 ## Music (Spotify)
 
 The Music screen connects your Spotify account and controls playback on one of your

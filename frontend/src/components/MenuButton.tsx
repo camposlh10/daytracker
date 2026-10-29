@@ -18,6 +18,10 @@ interface MenuButtonProps<T extends string> {
   /** For a choice menu: the option that is in effect, shown with a check mark. */
   checked?: T;
   variant?: 'primary' | 'secondary';
+  /** Which edge of the button the menu lines up with. */
+  align?: 'start' | 'end';
+  /** Styles the button itself, without the usual button look or the ▾ caret. */
+  triggerClassName?: string;
   onSelect: (id: T) => void;
 }
 
@@ -31,6 +35,8 @@ export function MenuButton<T extends string>({
   options,
   checked,
   variant = 'secondary',
+  align = 'end',
+  triggerClassName,
   onSelect,
 }: MenuButtonProps<T>) {
   const [open, setOpen] = useState(false);
@@ -116,26 +122,37 @@ export function MenuButton<T extends string>({
     }
   };
 
+  const triggerProps = {
+    ref: button,
+    'aria-label': label,
+    'aria-haspopup': 'menu' as const,
+    'aria-expanded': open,
+    'aria-controls': open ? menuId : undefined,
+    onClick: () => (open ? close(false) : show(checkedIndex)),
+    onKeyDown: onButtonKey,
+  };
+
   return (
     <div ref={root} className={styles.root}>
-      <Button
-        ref={button}
-        variant={variant}
-        aria-label={label}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-controls={open ? menuId : undefined}
-        className={styles.trigger}
-        onClick={() => (open ? close(false) : show(checkedIndex))}
-        onKeyDown={onButtonKey}
-      >
-        {children}
-        <span className={styles.caret} aria-hidden="true">
-          ▾
-        </span>
-      </Button>
+      {triggerClassName ? (
+        <button type="button" className={triggerClassName} {...triggerProps}>
+          {children}
+        </button>
+      ) : (
+        <Button variant={variant} className={styles.trigger} {...triggerProps}>
+          {children}
+          <span className={styles.caret} aria-hidden="true">
+            ▾
+          </span>
+        </Button>
+      )}
       {open && (
-        <div id={menuId} role="menu" className={styles.menu} onKeyDown={onMenuKey}>
+        <div
+          id={menuId}
+          role="menu"
+          className={`${styles.menu} ${align === 'start' ? styles.start : ''}`}
+          onKeyDown={onMenuKey}
+        >
           {options.map((option, index) => (
             <button
               key={option.id}

@@ -1,7 +1,7 @@
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
 import { createPortal } from 'react-dom';
-import { booksApi, calendarApi, errorMessage, eventsApi, isConflict, progressApi, reviewsApi } from '../../api/client';
-import type { Book, CalendarItem, Category, DailyReview, ReadingSession } from '../../api/bridge';
+import { ApiError, booksApi, calendarApi, errorMessage, eventsApi, isConflict, progressApi, reviewsApi } from '../../api/client';
+import type { Book, Category, DailyReview, ReadingSession } from '../../api/bridge';
 import { useLoadable } from '../../app/useLoadable';
 import { Button } from '../../components/Button';
 import { Dialog } from '../../components/Dialog';
@@ -24,6 +24,7 @@ import { DeleteSessionDialog, SessionDialog, type SessionEditorTarget } from '..
 import { EMPTY_REVIEW, ReviewForm, type ReviewFields } from '../reviews/ReviewForm';
 import { TaskDialog, type TaskEditorTarget } from '../tasks/TaskDialog';
 import { useTaskActions } from '../tasks/useTaskActions';
+import { holidayItem, useHolidays, type DayItem } from './holidays';
 import { MiniMonth } from './MiniMonth';
 import { MonthGrid } from './MonthGrid';
 import { SelectedDayPanel } from './SelectedDayPanel';
@@ -125,6 +126,8 @@ export function CalendarPage({
   const [justSaved, setJustSaved] = useState<DailyReview | null>(null);
   // The review opens in a dialog from the Create menu; closing it keeps any unsaved text.
   const [reviewOpen, setReviewOpen] = useState(false);
+  // The book on show in the day panel's carousel; the panel itself is rebuilt for each day.
+  const [shownBookId, setShownBookId] = useState<string | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
   const [zoom, setZoom] = useState(savedZoom);
   const reload = () => setChanges((count) => count + 1);
@@ -176,8 +179,14 @@ export function CalendarPage({
     return () => window.removeEventListener('beforeunload', warn);
   }, [hasUnsavedChanges]);
 
+  const holidays = useHolidays(visibleDates);
+
+  // Each date's holidays come first, then what is stored for it.
   const itemsByDate = useMemo(() => {
-    const byDate = new Map<IsoDate, CalendarItem[]>();
+    const byDate = new Map<IsoDate, DayItem[]>();
+    for (const [date, list] of holidays) {
+      byDate.set(date, list.map(holidayItem));
+    }
     if (range.status === 'loaded') {
       for (const item of range.data.items) {
         const items = byDate.get(item.date);
@@ -189,7 +198,7 @@ export function CalendarPage({
       }
     }
     return byDate;
-  }, [range]);
+  }, [range, holidays]);
 
   const applySelection = (date: IsoDate) => {
     setSelected(date);
@@ -303,22 +312,28 @@ export function CalendarPage({
     }
   };
 
-  /** An appointment in the time grid was clicked: select its day and open it. */
-  const openEvent = async (id: string, date: IsoDate) => {
-    if (!requestSelection(date)) {
-      return;
-    }
+  /**
+   * Opens an appointment as stored. A repeating one is edited as a whole, from its
+   * first occurrence, so the one clicked is not taken for the start.
+   */
+  const editStored = async (id: string) => {
     setOpenError(null);
     try {
-      const event = (await eventsApi.list({ from: date, to: addDays(date, 1) })).find((found) => found.id === id);
-      if (event) {
-        setEventEditor({ kind: 'edit', event });
-      } else {
+      setEventEditor({ kind: 'edit', event: await eventsApi.get(id) });
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
         setOpenError('That appointment was removed elsewhere.');
         reload();
+      } else {
+        setOpenError(`The appointment could not be opened: ${errorMessage(error)}`);
       }
-    } catch (error) {
-      setOpenError(`The appointment could not be opened: ${errorMessage(error)}`);
+    }
+  };
+
+  /** An appointment in the time grid was clicked: select its day and open it. */
+  const openEvent = async (id: string, date: IsoDate) => {
+    if (requestSelection(date)) {
+      await editStored(id);
     }
   };
 
@@ -494,11 +509,16 @@ export function CalendarPage({
         onOpenTask={(task) => setEditor({ kind: 'edit', task })}
         onMoveToDay={(task) => void actions.moveTo(task, selected)}
         readingBlocked={readingBlocked}
-        onLogReading={() => setSessionEditor({ kind: 'create', date: selected })}
+        onLogReading={(bookId) => setSessionEditor({ kind: 'create', date: selected, bookId })}
+        shownBookId={shownBookId}
+        onShowBook={setShownBookId}
         onEditSession={(session) => setSessionEditor({ kind: 'edit', session })}
         onDeleteSession={setDeletingSession}
         onAddEvent={() => setEventEditor({ kind: 'create', date: selected })}
-        onEditEvent={(event) => setEventEditor({ kind: 'edit', event })}
+        onEditEvent={(event) =>
+          event.repeat ? void editStored(event.id) : setEventEditor({ kind: 'edit', event })
+        }
+        holidays={holidays.get(selected)}
       />
 
       {reviewOpen && (
@@ -544,6 +564,7 @@ export function CalendarPage({
         <EventDialog
           target={eventEditor}
           categories={categories}
+          weekStart={weekStart}
           backendReady={backendReady}
           onClose={() => setEventEditor(null)}
           onSaved={reload}

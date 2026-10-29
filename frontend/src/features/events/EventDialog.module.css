@@ -25,6 +25,157 @@
   accent-color: var(--color-primary);
 }
 
+/* An option that is off unless wanted: a switch, with what happens when it is off. */
+.option {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+}
+
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.switch input {
+  position: relative;
+  flex-shrink: 0;
+  width: 34px;
+  height: 20px;
+  margin: 0;
+  background: var(--color-elevated);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  cursor: pointer;
+  appearance: none;
+  transition: background 120ms ease;
+}
+
+.switch input::before {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background: var(--color-text-secondary);
+  border-radius: 999px;
+  content: '';
+  transition: transform 120ms ease;
+}
+
+.switch input:checked {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.switch input:checked::before {
+  background: var(--color-on-primary);
+  transform: translateX(14px);
+}
+
+.switch input:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.hint {
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+}
+
+.addLink {
+  align-self: flex-start;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-primary-hover);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.addLink:hover {
+  text-decoration: underline;
+}
+
+@media (forced-colors: active) {
+  .switch input,
+  .switch input::before {
+    border: 1px solid CanvasText;
+  }
+
+  .switch input:checked {
+    background: Highlight;
+  }
+}
+
+/* The days of the week an appointment repeats on, pressed on or off. */
+.weekdays {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.weekday {
+  min-width: 52px;
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.weekday:hover {
+  background: var(--color-elevated);
+}
+
+.weekdayOn,
+.weekdayOn:hover {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-on-primary);
+  font-weight: 700;
+}
+
+.weekdays .hint {
+  flex-basis: 100%;
+}
+
+/* The optional extras that are not shown until asked for. */
+.addRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+}
+
+.linksField {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.linkRow {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.linkRow input {
+  flex: 1;
+  min-width: 0;
+}
+
 /* Keeps Delete away from Save so it is not pressed by accident. */
 .pushLeft {
   margin-right: auto;

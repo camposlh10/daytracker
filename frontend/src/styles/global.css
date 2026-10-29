@@ -12,6 +12,15 @@ body,
   height: 100%;
 }
 
+/* Everything still scrolls (wheel, keyboard, touch); the bars themselves are not drawn. */
+* {
+  scrollbar-width: none;
+}
+
+::-webkit-scrollbar {
+  display: none;
+}
+
 body {
   margin: 0;
   background: var(--color-app-bg);

@@ -1,0 +1,103 @@
+/* Set apart from the day's reading below it. */
+.carousel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.slide {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.title {
+  display: -webkit-box;
+  overflow: hidden;
+  font-weight: 600;
+  line-height: 1.25;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+
+.author {
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page {
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.arrow {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.arrow:hover {
+  background: var(--color-elevated);
+}
+
+.dots {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 5px;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  background: var(--color-border-strong);
+  border-radius: 999px;
+}
+
+.current {
+  background: var(--color-primary);
+}
+
+.none {
+  color: var(--color-text-secondary);
+}
+
+@media (forced-colors: active) {
+  .current {
+    background: Highlight;
+  }
+
+  .dot {
+    border: 1px solid CanvasText;
+  }
+}

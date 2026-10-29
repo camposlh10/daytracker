@@ -1,7 +1,8 @@
 .fullPage {
   display: grid;
+  flex: 1;
   place-items: center;
-  height: 100%;
+  min-height: 0;
   padding: var(--space-5);
 }
 

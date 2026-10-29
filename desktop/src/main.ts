@@ -11,9 +11,17 @@ import { restoreFromBackup } from './restore';
 import { recoverInterruptedRestore } from './restoreSwap';
 import { describeServer, loadServer, normalizeServerUrl, saveServer, testServer, validToken } from './serverConfig';
 import { createSpotify, handleSpotifyImageScheme } from './spotify';
+import { HolidayService } from './holidays';
+import { usesUsMeasurements, WeatherService } from './weather';
+import { loadPlacement, rememberPlacement } from './windowState';
 
 const DEV_SERVER_URL = 'http://127.0.0.1:5173/';
 const STARTUP_TIMEOUT_MS = 60_000;
+// The page draws its own title bar, like Spotify's; Windows draws its buttons over the
+// right end in these colours (--color-titlebar and --color-text-secondary in tokens.css).
+const TITLE_BAR = { color: '#181b21', symbolColor: '#b4bdca', height: 56 };
+const MIN_WIDTH = 1100;
+const MIN_HEIGHT = 720;
 
 const isDev = !app.isPackaged;
 const rendererIndex = path.join(__dirname, '..', 'renderer', 'index.html');
@@ -68,14 +76,17 @@ function isTrustedSender(event: IpcMainInvokeEvent): boolean {
 }
 
 function createWindow(): void {
+  const placementFile = path.join(app.getPath('userData'), 'window.json');
+  const placement = loadPlacement(placementFile, MIN_WIDTH, MIN_HEIGHT);
   mainWindow = new BrowserWindow({
-    width: 1360,
-    height: 860,
-    minWidth: 1100,
-    minHeight: 720,
+    ...placement.bounds,
+    minWidth: MIN_WIDTH,
+    minHeight: MIN_HEIGHT,
     show: false,
     backgroundColor: '#20242C',
     title: 'Day Tracker',
+    titleBarStyle: 'hidden',
+    titleBarOverlay: TITLE_BAR,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
@@ -84,7 +95,13 @@ function createWindow(): void {
       devTools: isDev,
     },
   });
-  mainWindow.once('ready-to-show', () => mainWindow?.show());
+  mainWindow.once('ready-to-show', () => {
+    if (placement.maximized) {
+      mainWindow?.maximize();
+    }
+    mainWindow?.show();
+  });
+  rememberPlacement(mainWindow, placementFile);
   // The page refuses to unload while it holds unsaved edits; let the user decide.
   mainWindow.webContents.on('will-prevent-unload', (event) => {
     const options = {
@@ -209,6 +226,22 @@ if (!app.requestSingleInstanceLock()) {
       },
       restoreBackup: onServer(() => restoreFromBackup({ window: mainWindow, backend: manager, dataDir })),
       spotify,
+      weather: new WeatherService({ usMeasurements: await usesUsMeasurements() }),
+      holidays: new HolidayService({ cacheDir: path.join(app.getPath('userData'), 'holidays') }),
+      openLink: async (url) => {
+        let parsed: URL;
+        try {
+          parsed = new URL(url);
+        } catch {
+          return invalidLink();
+        }
+        // Web pages only: no files, programs or other schemes.
+        if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+          return invalidLink();
+        }
+        await shell.openExternal(parsed.href);
+        return { ok: true, data: null };
+      },
       server: {
         describe: () => describeServer(app.getPath('userData'), remote),
         test: (url, token) => {
@@ -257,6 +290,13 @@ if (!app.requestSingleInstanceLock()) {
         }
       });
   });
+}
+
+function invalidLink(): ApiResult<never> {
+  return {
+    ok: false,
+    error: { status: 400, code: 'VALIDATION_FAILED', message: 'Only web addresses (https:// or http://) can be opened.' },
+  };
 }
 
 function invalidServer(): ApiResult<never> {

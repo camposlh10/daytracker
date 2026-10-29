@@ -392,8 +392,8 @@ describe('Reading in the calendar', () => {
     expect(within(cell).getByText(/24 pages read/)).toBeInTheDocument();
     expect(within(cell).getByText('Dune').closest('[title]')).toHaveAttribute('title', 'Dune: 24 pages read');
     const reading = screen.getByRole('region', { name: 'Reading' });
-    expect(await within(reading).findByText(/24 of 40 pages/)).toHaveTextContent('60% of the target');
-    const sessions = within(reading).getByRole('list', { name: 'Reading sessions for this day' });
+    const sessions = await within(reading).findByRole('list', { name: 'Reading sessions for this day' });
+    expect(reading).toHaveTextContent('Read 24 / 40 pages');
     expect(sessions).toHaveTextContent('Dune');
     expect(sessions).toHaveTextContent('24 pages, to page 140');
     // Reading is not a task: it does not count as planned.
@@ -424,18 +424,77 @@ describe('Reading in the calendar', () => {
     await waitFor(() => expect(bridge.calendar.getDay.mock.calls.length).toBeGreaterThan(readsBefore));
   });
 
+  it('shows the book being read, and moves between several like a carousel', async () => {
+    const user = userEvent.setup();
+    const { bridge } = installFakeBridge();
+    const dune = book({ title: 'Dune', author: 'Frank Herbert', totalPages: 600, currentPage: 150 });
+    const emma = book({ title: 'Emma', author: 'Jane Austen', totalPages: 400, currentPage: 40 });
+    const done = book({ title: 'Finished one', status: 'FINISHED' });
+    const shelved = book({ title: 'Shelved', archivedAt: '2026-10-02T10:00:00.000Z' });
+    bridge.books.list.mockResolvedValue({ ok: true, data: [done, dune, shelved, emma] });
+    bridge.readingSessions.create.mockResolvedValue({ ok: true, data: readingSession() });
+    render(<CalendarPage today={TODAY} backendReady />);
+
+    const carousel = await screen.findByRole('region', { name: 'Currently reading' });
+    await within(carousel).findByText('Dune');
+    expect(carousel).toHaveTextContent('Frank Herbert');
+    expect(carousel).toHaveTextContent('150 of 600 pages');
+    expect(within(carousel).getByTestId('book-cover')).toBeInTheDocument();
+    expect(within(carousel).getByRole('group', { name: '1 of 2' })).toBeInTheDocument();
+
+    await user.click(within(carousel).getByRole('button', { name: 'Next book' }));
+    expect(carousel).toHaveTextContent('Emma');
+    expect(carousel).toHaveTextContent('Jane Austen');
+    expect(carousel).not.toHaveTextContent('Dune');
+    // It wraps around, and the arrow keys move too.
+    await user.click(within(carousel).getByRole('button', { name: 'Next book' }));
+    expect(carousel).toHaveTextContent('Dune');
+    within(carousel).getByRole('button', { name: 'Previous book' }).focus();
+    await user.keyboard('{ArrowLeft}');
+    expect(carousel).toHaveTextContent('Emma');
+    expect(carousel).not.toHaveTextContent(/Finished one|Shelved/);
+
+    // Choosing another day keeps the book on show.
+    await user.click(screen.getByRole('button', { name: /^Saturday, October 3, 2026/ }));
+    await user.click(screen.getByRole('button', { name: /^Sunday, October 4, 2026/ }));
+    expect(await screen.findByRole('region', { name: 'Currently reading' })).toHaveTextContent('Emma');
+
+    // Logging reading starts with the book on show.
+    await user.click(screen.getByRole('button', { name: 'Log reading' }));
+    await user.type(within(screen.getByRole('dialog', { name: 'Log reading' })).getByLabelText('Pages read'), '5');
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(bridge.readingSessions.create).toHaveBeenCalledWith(expect.objectContaining({ bookId: emma.id })),
+    );
+  });
+
+  it('shows one book without arrows, and says when none is being read', async () => {
+    const { bridge } = installFakeBridge();
+    bridge.books.list.mockResolvedValue({ ok: true, data: [book({ title: 'Dune' })] });
+    const { unmount } = render(<CalendarPage today={TODAY} backendReady />);
+    const carousel = await screen.findByRole('region', { name: 'Currently reading' });
+    await within(carousel).findByText('Dune');
+    expect(within(carousel).queryByRole('button')).not.toBeInTheDocument();
+    unmount();
+
+    bridge.books.list.mockResolvedValue({ ok: true, data: [book({ title: 'Done', status: 'FINISHED' })] });
+    render(<CalendarPage today={TODAY} backendReady />);
+    expect(await screen.findByText('Not reading a book right now.')).toBeInTheDocument();
+  });
+
   it('does not offer to log reading for a future day or without a book', async () => {
     const user = userEvent.setup();
     const { bridge } = installFakeBridge();
     render(<CalendarPage today={TODAY} backendReady />);
 
     expect(await screen.findByText('Add a book on the Reading page first.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Log reading' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Log reading' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Currently reading' })).not.toBeInTheDocument();
 
     bridge.books.list.mockResolvedValue({ ok: true, data: [book()] });
     await user.click(screen.getByRole('button', { name: /^Thursday, October 15, 2026/ }));
     expect(await screen.findByText('Reading cannot be logged for a future date.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Log reading' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Log reading' })).not.toBeInTheDocument();
   });
 
   it('deletes a session from the selected day after confirmation', async () => {

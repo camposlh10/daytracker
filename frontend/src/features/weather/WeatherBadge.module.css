@@ -1,0 +1,54 @@
+/* The picture with the temperature under it, at the right of the sidebar's header. */
+.badge {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.1;
+}
+
+/* Pixel art stays crisp: whole pixels, no smoothing. */
+.icon {
+  display: block;
+  image-rendering: pixelated;
+}
+
+/* The temperature switches between °C and °F when clicked. */
+.temperature {
+  padding: 1px 4px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font: inherit;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.temperature:hover {
+  background: var(--color-surface);
+}
+
+.off {
+  font-size: 1.1rem;
+  line-height: 32px;
+}
+
+.offText {
+  white-space: nowrap;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

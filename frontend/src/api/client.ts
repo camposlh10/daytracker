@@ -24,6 +24,10 @@ import {
   type SpotifyDevice,
   type SpotifyPlayback,
   type SpotifyPlayInput,
+  type SpotifyRepeat,
+  type SpotifyTrackPage,
+  type Weather,
+  type Holiday,
   type SpotifyPlaylist,
   type SpotifySearchResult,
   type SpotifyStatus,
@@ -140,6 +144,8 @@ export const readingGoalsApi = {
 
 export const eventsApi = {
   list: (query: DateRangeQuery): Promise<CalendarEvent[]> => unwrap(bridge().events.list(query)),
+  /** As stored: a repeating appointment with its first occurrence. */
+  get: (id: string): Promise<CalendarEvent> => unwrap(bridge().events.get(id)),
   create: (input: CreateEventInput): Promise<CalendarEvent> => unwrap(bridge().events.create(input)),
   update: (id: string, input: UpdateEventInput): Promise<CalendarEvent> => unwrap(bridge().events.update(id, input)),
   delete: (id: string, version: number): Promise<null> => unwrap(bridge().events.delete(id, version)),
@@ -178,6 +184,17 @@ export const exportsApi = {
     unwrap(bridge().exports.save(dataset, range)),
 };
 
+export const holidaysApi = {
+  list: (year: number): Promise<Holiday[]> => unwrap(bridge().holidays.list(year)),
+};
+
+/** Opens a web address in the default browser. */
+export const openLink = (url: string): Promise<null> => unwrap(bridge().app.openLink(url));
+
+export const weatherApi = {
+  current: (): Promise<Weather> => unwrap(bridge().weather.current()),
+};
+
 export const spotifyApi = {
   status: (): Promise<SpotifyStatus> => unwrap(bridge().spotify.status()),
   configure: (clientId: string, redirectUri: string): Promise<SpotifyStatus> =>
@@ -188,10 +205,18 @@ export const spotifyApi = {
   playlists: (): Promise<SpotifyPlaylist[]> => unwrap(bridge().spotify.playlists()),
   devices: (): Promise<SpotifyDevice[]> => unwrap(bridge().spotify.devices()),
   playback: (): Promise<SpotifyPlayback | null> => unwrap(bridge().spotify.playback()),
+  playlistItems: (playlistId: string, offset = 0): Promise<SpotifyTrackPage> =>
+    unwrap(bridge().spotify.playlistItems(playlistId, offset)),
+  likedSongs: (offset = 0): Promise<SpotifyTrackPage> => unwrap(bridge().spotify.likedSongs(offset)),
+  queue: (uri: string): Promise<null> => unwrap(bridge().spotify.queue(uri)),
   play: (input?: SpotifyPlayInput): Promise<null> => unwrap(bridge().spotify.play(input)),
   pause: (): Promise<null> => unwrap(bridge().spotify.pause()),
   next: (): Promise<null> => unwrap(bridge().spotify.next()),
   previous: (): Promise<null> => unwrap(bridge().spotify.previous()),
+  seek: (positionMs: number): Promise<null> => unwrap(bridge().spotify.seek(positionMs)),
+  volume: (percent: number): Promise<null> => unwrap(bridge().spotify.volume(percent)),
+  shuffle: (on: boolean): Promise<null> => unwrap(bridge().spotify.shuffle(on)),
+  repeat: (mode: SpotifyRepeat): Promise<null> => unwrap(bridge().spotify.repeat(mode)),
   transfer: (deviceId: string): Promise<null> => unwrap(bridge().spotify.transfer(deviceId)),
 };
 

@@ -1,11 +1,15 @@
 package com.daytracker.events;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.time.Clock;
+import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -30,6 +34,12 @@ public class EventService {
 	static final int MAX_SPAN_DAYS = 366;
 
 	static final int MAX_RANGE_DAYS = 93;
+
+	static final int MAX_REPEAT_DATES = 366;
+
+	static final int MAX_LINKS = 10;
+
+	static final int MAX_LINK_LENGTH = 2_000;
 
 	public record CreateResult(CalendarEvent event, boolean created) {
 	}
@@ -58,8 +68,10 @@ public class EventService {
 		if (ChronoUnit.DAYS.between(from, toExclusive) > MAX_RANGE_DAYS) {
 			throw new InvalidInputException("to", "An event query is limited to " + MAX_RANGE_DAYS + " days.");
 		}
-		return repository.findOverlapping(from, toExclusive, from.atStartOfDay(displayZone.zone()).toInstant(),
-				toExclusive.atStartOfDay(displayZone.zone()).toInstant());
+		return EventOccurrences.expand(
+				repository.findOverlapping(from, toExclusive, from.atStartOfDay(displayZone.zone()).toInstant(),
+						toExclusive.atStartOfDay(displayZone.zone()).toInstant()),
+				from, toExclusive, displayZone.zone());
 	}
 
 	@Transactional(readOnly = true)
@@ -145,8 +157,8 @@ public class EventService {
 				throw new InvalidInputException("endDateExclusive",
 						"An event can last at most " + MAX_SPAN_DAYS + " days.");
 			}
-			return new CalendarEvent(id, title, notes, fields.categoryId(), true, null, null, null, startDate, endDate,
-					createdAt, updatedAt, version, false);
+			return withRepeatAndLinks(new CalendarEvent(id, title, notes, fields.categoryId(), true, null, null, null,
+					startDate, endDate, null, null, null, null, null, createdAt, updatedAt, version, false), fields);
 		}
 
 		if (fields.startDate() != null || fields.endDateExclusive() != null) {
@@ -163,8 +175,110 @@ public class EventService {
 		if (ChronoUnit.DAYS.between(startsAt, endsAt) > MAX_SPAN_DAYS) {
 			throw new InvalidInputException("end", "An event can last at most " + MAX_SPAN_DAYS + " days.");
 		}
-		return new CalendarEvent(id, title, notes, fields.categoryId(), false, Timestamps.truncate(startsAt),
-				Timestamps.truncate(endsAt), zone.getId(), null, null, createdAt, updatedAt, version, false);
+		return withRepeatAndLinks(new CalendarEvent(id, title, notes, fields.categoryId(), false,
+				Timestamps.truncate(startsAt), Timestamps.truncate(endsAt), zone.getId(), null, null, null, null, null,
+				null, null, createdAt, updatedAt, version, false), fields);
+	}
+
+	/**
+	 * Checks and adds the repeat and the links to an event whose times are already
+	 * checked. A weekly repeat that was given a start on another weekday starts on
+	 * the first chosen weekday after it instead, so the stored start is always an
+	 * occurrence.
+	 */
+	private static CalendarEvent withRepeatAndLinks(CalendarEvent event, EventRequests.Fields fields) {
+		List<LocalDate> dates = fields.repeatDates() == null ? List.of() : fields.repeatDates();
+		List<DayOfWeek> weekdays = fields.repeatWeekdays() == null ? List.of()
+				: fields.repeatWeekdays().stream().distinct().sorted().toList();
+		String rule = fields.repeat();
+		LocalDate until = fields.repeatUntil();
+		if (!CalendarEvent.WEEKLY.equals(rule) && !weekdays.isEmpty()) {
+			throw new InvalidInputException("repeatWeekdays", "Days of the week are only for an appointment repeated weekly.");
+		}
+		if (CalendarEvent.WEEKLY.equals(rule)) {
+			if (weekdays.isEmpty()) {
+				throw new InvalidInputException("repeatWeekdays", "Choose at least one day of the week.");
+			}
+			LocalDate start = event.ownFirstDate();
+			LocalDate moved = start;
+			while (!weekdays.contains(moved.getDayOfWeek())) {
+				moved = moved.plusDays(1);
+			}
+			if (!moved.equals(start)) {
+				event = event.occurrenceOn(moved);
+			}
+		}
+		LocalDate first = event.ownFirstDate();
+		if (rule == null) {
+			if (until != null || !dates.isEmpty()) {
+				throw new InvalidInputException("repeat", "Say how the appointment repeats.");
+			}
+		}
+		else if (rule.equals(CalendarEvent.DAILY) || rule.equals(CalendarEvent.WEEKLY)) {
+			if (!dates.isEmpty()) {
+				throw new InvalidInputException("repeatDates", "An appointment repeated every day or week has no list of dates.");
+			}
+			if (until != null && until.isBefore(first)) {
+				throw new InvalidInputException("repeatUntil", "The last day cannot be before the first.");
+			}
+		}
+		else if (rule.equals(CalendarEvent.DATES)) {
+			if (until != null) {
+				throw new InvalidInputException("repeatUntil", "Chosen dates end on the last one chosen.");
+			}
+			dates = dates.stream().distinct().sorted().toList();
+			if (dates.size() < 2) {
+				throw new InvalidInputException("repeatDates", "Choose at least two dates, or do not repeat it.");
+			}
+			if (dates.size() > MAX_REPEAT_DATES) {
+				throw new InvalidInputException("repeatDates", "Choose at most " + MAX_REPEAT_DATES + " dates.");
+			}
+			if (!dates.get(0).equals(first)) {
+				throw new InvalidInputException("repeatDates", "The first chosen date must be the start date.");
+			}
+			until = dates.get(dates.size() - 1);
+		}
+		else {
+			throw new InvalidInputException("repeat",
+					"An appointment repeats every day (DAILY), on days of the week (WEEKLY) or on chosen dates (DATES).");
+		}
+		return new CalendarEvent(event.id(), event.title(), event.notes(), event.categoryId(), event.allDay(),
+				event.startsAt(), event.endsAt(), event.timezone(), event.startDate(), event.endDateExclusive(), rule,
+				until, rule == null ? List.of() : dates, weekdays, links(fields.links()), event.createdAt(),
+				event.updatedAt(), event.version(), false);
+	}
+
+	/** Web addresses only (http or https), trimmed, without repeats. */
+	private static List<String> links(List<String> requested) {
+		if (requested == null) {
+			return List.of();
+		}
+		List<String> links = requested.stream()
+			.map(link -> link == null ? "" : link.strip())
+			.filter(link -> !link.isEmpty())
+			.distinct()
+			.toList();
+		if (links.size() > MAX_LINKS) {
+			throw new InvalidInputException("links", "An appointment can have at most " + MAX_LINKS + " links.");
+		}
+		for (String link : links) {
+			if (link.length() > MAX_LINK_LENGTH || !isWebAddress(link)) {
+				throw new InvalidInputException("links", "Links must be web addresses that start with https:// or http://.");
+			}
+		}
+		return links;
+	}
+
+	private static boolean isWebAddress(String link) {
+		try {
+			URI uri = new URI(link);
+			String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+			return (scheme.equals("https") || scheme.equals("http")) && uri.getHost() != null
+					&& !link.contains("\n") && !link.contains(" ");
+		}
+		catch (URISyntaxException failure) {
+			return false;
+		}
 	}
 
 	private static ZoneId zone(String timezone) {
@@ -186,7 +300,10 @@ public class EventService {
 				&& Objects.equals(a.categoryId(), b.categoryId()) && a.allDay() == b.allDay()
 				&& Objects.equals(a.startsAt(), b.startsAt()) && Objects.equals(a.endsAt(), b.endsAt())
 				&& Objects.equals(a.timezone(), b.timezone()) && Objects.equals(a.startDate(), b.startDate())
-				&& Objects.equals(a.endDateExclusive(), b.endDateExclusive());
+				&& Objects.equals(a.endDateExclusive(), b.endDateExclusive())
+				&& Objects.equals(a.repeatRule(), b.repeatRule()) && Objects.equals(a.repeatUntil(), b.repeatUntil())
+				&& a.repeatDates().equals(b.repeatDates()) && a.repeatWeekdays().equals(b.repeatWeekdays())
+				&& a.links().equals(b.links());
 	}
 
 	private static <T> T required(T value, String field) {

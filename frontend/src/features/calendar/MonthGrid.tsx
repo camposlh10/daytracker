@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import type { CalendarItem } from '../../api/bridge';
+import type { DayItem } from './holidays';
 import {
   formatMonthTitle,
   isSameMonth,
@@ -20,11 +20,11 @@ interface MonthGridProps {
   selected: IsoDate;
   today: IsoDate;
   weekStart: WeekStart;
-  itemsByDate: Map<IsoDate, CalendarItem[]>;
+  itemsByDate: Map<IsoDate, DayItem[]>;
   onSelect: (date: IsoDate) => boolean;
 }
 
-const NO_ITEMS: CalendarItem[] = [];
+const NO_ITEMS: DayItem[] = [];
 
 /** Seven columns and a fixed six-week grid, including neighboring-month dates. */
 export function MonthGrid({ anchor, selected, today, weekStart, itemsByDate, onSelect }: MonthGridProps) {

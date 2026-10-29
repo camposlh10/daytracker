@@ -107,8 +107,45 @@ const chooseView = (name) =>
     }, 100));
   })()`);
 
-const runStep = (step) => (typeof step === 'string' ? clickButton(step) : chooseView(step.view));
-const stepName = (step) => (typeof step === 'string' ? step : `${step.view} view`);
+// Runs in the page: picks an item from the open menu, or turns on a switch, by its text.
+const clickByText = (selector, label) =>
+  evaluate(`(() => {
+    const target = [...document.querySelectorAll(${JSON.stringify(selector)})].find((el) => (el.closest('label') ?? el).textContent.includes(${JSON.stringify(label)}));
+    if (!target) return false;
+    target.click();
+    return true;
+  })()`);
+
+// Runs in the page: opens a screen from the title bar's ⋯ menu.
+const openScreen = async (name) => {
+  await evaluate(`document.querySelector('button[aria-label="Menu"]')?.click()`);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  return clickByText('[role=menuitemradio]', name);
+};
+
+// Runs in the page: picks an option of a labelled drop-down, as a person would.
+const chooseOption = (label, value) =>
+  evaluate(`(() => {
+    const field = [...document.querySelectorAll('label')].find((el) => el.textContent.trim() === ${JSON.stringify(label)});
+    const select = field && document.getElementById(field.htmlFor);
+    if (!select) return false;
+    select.value = ${JSON.stringify(value)};
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+  })()`);
+
+const runStep = (step) =>
+  typeof step === 'string'
+    ? clickButton(step)
+    : step.select
+      ? chooseOption(step.select, step.value)
+      : step.menu
+      ? clickByText('[role^=menuitem]', step.menu)
+      : step.switch
+        ? clickByText('[role=switch]', step.switch)
+        : chooseView(step.view);
+const stepName = (step) =>
+  typeof step === 'string' ? step : step.select ? `${step.select}: ${step.value}` : step.menu ? `${step.menu} in the menu` : step.switch ? `${step.switch} switch` : `${step.view} view`;
 
 // Runs in the page: what is cut off, covered or overflowing right now.
 const INSPECT = `(() => {
@@ -147,6 +184,12 @@ const scenes = [
   { name: 'calendar-create-menu', steps: ['+ Create'], after: ['+ Create'] },
   { name: 'calendar-day-zoomed', steps: [{ view: 'Day' }, '+', '+', '+'], after: ['−', '−', '−'] },
   { name: 'calendar-back-to-month', steps: [{ view: 'Month' }] },
+  { name: 'dialog-appointment', steps: ['+ Create', { menu: 'Appointment' }], dialog: true },
+  // With every optional part shown: the end, and the description.
+  { name: 'dialog-appointment-weekly', steps: ['+ Create', { menu: 'Appointment' }, { select: 'Repeat', value: 'WEEKLY' }], dialog: true },
+  // Repeating on chosen dates, with the date picker and a link.
+  { name: 'dialog-appointment-repeat', steps: ['+ Create', { menu: 'Appointment' }, { select: 'Repeat', value: 'DATES' }, '+ Add link'], dialog: true },
+  { name: 'dialog-appointment-full', steps: ['+ Create', { menu: 'Appointment' }, { switch: 'Set an end' }, '+ Add description'], dialog: true },
   { name: 'tasks', nav: 'Tasks', steps: [] },
   { name: 'dialog-new-task', nav: 'Tasks', steps: ['+ New task'], dialog: true },
   { name: 'dialog-categories', nav: 'Tasks', steps: ['Categories'], dialog: true },
@@ -176,6 +219,8 @@ try {
   const bookId = randomUUID();
   await call('books.create', { id: bookId, title: 'A fairly long book title that has to wrap somewhere sensible', author: 'Someone With A Long Name', totalPages: 500, status: 'READING' });
   await call('readingSessions.create', { id: randomUUID(), bookId, activityDate: day(-1), pagesRead: 40, endingPage: 40 });
+  // A second book being read, so the day panel's carousel shows its arrows.
+  await call('books.create', { id: randomUUID(), title: 'Emma', author: 'Jane Austen', totalPages: 400, status: 'READING' });
   for (let n = 0; n < 6; n++) {
     const id = randomUUID();
     await call('tasks.create', { id, title: `Task number ${n + 1} with a reasonably descriptive title`, plannedDate: day(n % 3 - 1) });
@@ -190,7 +235,7 @@ try {
     await sleep(500);
     for (const scene of scenes) {
       await evaluate('document.activeElement?.blur()');
-      if (scene.nav) await clickButton(scene.nav); else await clickButton('Calendar');
+      await openScreen(scene.nav ?? 'Calendar');
       await sleep(400);
       for (const step of scene.steps) {
         if (!(await runStep(step))) console.log(`        (no "${stepName(step)}" button on this screen; skipped)`);
@@ -209,6 +254,9 @@ try {
       }
       if (scene.dialog) {
         await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); document.querySelector('[role=dialog]')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+        // A form with changes ignores Escape on purpose; discard them so the next scene starts clean.
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        await clickButton('Discard changes');
         await sleep(300);
       }
     }

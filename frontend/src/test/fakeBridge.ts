@@ -20,6 +20,9 @@ import type {
   ServerConnection,
   SpotifyPlayback,
   SpotifyStatus,
+  SpotifyTrackPage,
+  Weather,
+  Holiday,
   Progress,
   Task,
   TaskActivity,
@@ -130,6 +133,11 @@ export function calendarEvent(overrides: Partial<CalendarEvent> = {}): CalendarE
     localEnd: '2026-10-04T13:00:00',
     startDate: null,
     endDateExclusive: null,
+    repeat: null,
+    repeatUntil: null,
+    repeatDates: [],
+    repeatWeekdays: [],
+    links: [],
     overlapsAnother: false,
     createdAt: '2026-10-01T12:00:00.000Z',
     updatedAt: '2026-10-01T12:00:00.000Z',
@@ -189,6 +197,7 @@ export function installFakeBridge(initial: BackendState = { status: 'ready' }) {
     app: {
       openDiagnostics: vi.fn(async () => undefined),
       exit: vi.fn(async () => undefined),
+      openLink: vi.fn(async (): Promise<ApiResult<null>> => ({ ok: true, data: null })),
     },
     calendar: {
       getRange: vi.fn(
@@ -245,6 +254,7 @@ export function installFakeBridge(initial: BackendState = { status: 'ready' }) {
     },
     events: {
       list: vi.fn(async (): Promise<ApiResult<CalendarEvent[]>> => ({ ok: true, data: [] })),
+      get: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(async (): Promise<ApiResult<null>> => ({ ok: true, data: null })),
@@ -299,11 +309,41 @@ export function installFakeBridge(initial: BackendState = { status: 'ready' }) {
       playlists: vi.fn(),
       devices: vi.fn(),
       playback: vi.fn(async (): Promise<ApiResult<SpotifyPlayback | null>> => ({ ok: true, data: null })),
+      playlistItems: vi.fn(
+        async (_id: string, _offset?: number): Promise<ApiResult<SpotifyTrackPage>> => ({
+          ok: true,
+          data: { tracks: [], total: 0, nextOffset: null },
+        }),
+      ),
+      likedSongs: vi.fn(
+        async (_offset?: number): Promise<ApiResult<SpotifyTrackPage>> => ({
+          ok: true,
+          data: { tracks: [], total: 0, nextOffset: null },
+        }),
+      ),
+      queue: vi.fn(async (_uri: string): Promise<ApiResult<null>> => ({ ok: true, data: null })),
       play: vi.fn(async (): Promise<ApiResult<null>> => ({ ok: true, data: null })),
       pause: vi.fn(async (): Promise<ApiResult<null>> => ({ ok: true, data: null })),
       next: vi.fn(async (): Promise<ApiResult<null>> => ({ ok: true, data: null })),
       previous: vi.fn(async (): Promise<ApiResult<null>> => ({ ok: true, data: null })),
+      seek: vi.fn(async (): Promise<ApiResult<null>> => ({ ok: true, data: null })),
+      volume: vi.fn(async (): Promise<ApiResult<null>> => ({ ok: true, data: null })),
+      shuffle: vi.fn(async (): Promise<ApiResult<null>> => ({ ok: true, data: null })),
+      repeat: vi.fn(async (): Promise<ApiResult<null>> => ({ ok: true, data: null })),
       transfer: vi.fn(async (): Promise<ApiResult<null>> => ({ ok: true, data: null })),
+    },
+    // No holidays unless a test asks for some.
+    holidays: {
+      list: vi.fn(async (_year: number): Promise<ApiResult<Holiday[]>> => ({ ok: true, data: [] })),
+    },
+    weather: {
+      // Tests that do not care about the weather see none.
+      current: vi.fn(
+        async (): Promise<ApiResult<Weather>> => ({
+          ok: false,
+          error: { status: 0, code: 'WEATHER_UNAVAILABLE', message: 'No weather in tests.' },
+        }),
+      ),
     },
     exports: {
       save: vi.fn(

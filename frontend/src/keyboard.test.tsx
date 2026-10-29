@@ -41,20 +41,26 @@ describe('keyboard-only use', () => {
     expect(bridge.tasks.create.mock.calls[0][0]).toMatchObject({ title: 'Pay the bills', plannedDate: tomorrow });
   });
 
-  it('reaches every screen from the navigation with Tab and Enter', async () => {
+  it('reaches every screen from the menu with the arrow keys and Enter', async () => {
     installFakeBridge({ status: 'ready' });
     const user = userEvent.setup();
     render(<App />);
     await screen.findByRole('grid');
-    const nav = screen.getByRole('navigation', { name: 'Main' });
-    const first = within(nav).getAllByRole('button')[0];
-    first.focus();
+    const menuButton = screen.getByRole('button', { name: 'Menu' });
 
-    for (const name of ['Tasks', 'Reading', 'Progress', 'Music', 'Settings']) {
-      await user.tab();
-      expect(within(nav).getByRole('button', { name })).toHaveFocus();
+    for (const [steps, name] of [[1, 'Tasks'], [2, 'Reading'], [3, 'Progress'], [4, 'Music'], [5, 'Settings']] as const) {
+      menuButton.focus();
+      await user.keyboard('{Enter}');
+      // The menu opens on the screen that is open, which is the calendar each time.
+      await waitFor(() => expect(screen.getByRole('menuitemradio', { name: 'Calendar' })).toHaveFocus());
+      await user.keyboard('{ArrowDown}'.repeat(steps));
+      expect(screen.getByRole('menuitemradio', { name })).toHaveFocus();
       await user.keyboard('{Enter}');
       expect(await screen.findByRole('heading', { level: 1, name })).toBeInTheDocument();
+      expect(menuButton).toHaveFocus();
+      // Back to the calendar for the next round.
+      await user.keyboard('{Alt>}{ArrowLeft}{/Alt}');
+      await screen.findByRole('grid');
     }
   });
 
@@ -63,8 +69,11 @@ describe('keyboard-only use', () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByRole('grid');
-    screen.getByRole('button', { name: 'Tasks' }).focus();
+    // Tasks from the menu: one down from Calendar, or the last item.
+    screen.getByRole('button', { name: 'Menu' }).focus();
     await user.keyboard('{Enter}');
+    await waitFor(() => expect(screen.getByRole('menuitemradio', { name: 'Calendar' })).toHaveFocus());
+    await user.keyboard('{ArrowDown}{Enter}');
     const opener = await screen.findByRole('button', { name: '+ New task' });
     opener.focus();
 
@@ -90,8 +99,11 @@ describe('keyboard-only use', () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByRole('grid');
-    screen.getByRole('button', { name: 'Settings' }).focus();
+    // Settings from the menu: one down from Calendar, or the last item.
+    screen.getByRole('button', { name: 'Menu' }).focus();
     await user.keyboard('{Enter}');
+    await waitFor(() => expect(screen.getByRole('menuitemradio', { name: 'Calendar' })).toHaveFocus());
+    await user.keyboard('{End}{Enter}');
     const name = await screen.findByLabelText('Display name');
     name.focus();
 

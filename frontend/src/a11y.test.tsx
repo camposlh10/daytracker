@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App } from './App';
 import { accessibilityProblems } from './test/a11y';
+import { goTo } from './test/navigate';
 import { book, category, emptyDay, installFakeBridge, page, task } from './test/fakeBridge';
 
 /** Fills the fake backend with a little of everything, so every screen has content. */
@@ -11,7 +12,8 @@ function populated() {
   const dune = book({ title: 'Dune', author: 'Frank Herbert', totalPages: 600, currentPage: 120, pagesReadTotal: 120 });
   const todo = task({ title: 'Write the report', plannedDate: '2026-10-04', categoryId: work.id, priority: 'HIGH' });
   fake.bridge.categories.list.mockResolvedValue({ ok: true, data: [work] });
-  fake.bridge.books.list.mockResolvedValue({ ok: true, data: [dune] });
+  const emma = book({ title: 'Emma', author: 'Jane Austen', totalPages: 400, currentPage: 40 });
+  fake.bridge.books.list.mockResolvedValue({ ok: true, data: [dune, emma] });
   fake.bridge.tasks.list.mockResolvedValue(page([todo, task({ title: 'Already done', status: 'DONE', completedAt: '2026-10-03T12:00:00Z' })]));
   fake.bridge.calendar.getDay.mockImplementation(async (date: string) => ({
     ok: true,
@@ -36,7 +38,7 @@ describe('Accessibility (automated rules)', () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByRole('grid');
-    await user.click(screen.getByRole('button', { name: nav }));
+    await goTo(user, nav);
     await screen.findByRole('heading', { level: 1 });
     await new Promise((resolve) => setTimeout(resolve, 100));
 
@@ -82,7 +84,7 @@ describe('Accessibility (automated rules)', () => {
       populated();
       const user = userEvent.setup();
       render(<App />);
-      await user.click(await screen.findByRole('button', { name: nav }));
+      await goTo(user, nav);
       await user.click(await screen.findByRole('button', { name: opener }));
       await screen.findByRole('dialog');
 
@@ -94,7 +96,7 @@ describe('Accessibility (automated rules)', () => {
     populated();
     const user = userEvent.setup();
     render(<App />);
-    await user.click(await screen.findByRole('button', { name: 'Tasks' }));
+    await goTo(user, 'Tasks');
     await user.click(await screen.findByRole('button', { name: '+ New task' }));
     await screen.findByRole('dialog', { name: 'New task' });
 
@@ -105,7 +107,7 @@ describe('Accessibility (automated rules)', () => {
     populated();
     const user = userEvent.setup();
     render(<App />);
-    await user.click(await screen.findByRole('button', { name: 'Tasks' }));
+    await goTo(user, 'Tasks');
     await user.click(await screen.findByRole('button', { name: 'Categories' }));
     await screen.findByRole('dialog', { name: 'Categories' });
 

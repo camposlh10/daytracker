@@ -18,6 +18,7 @@ const bridge: DayTrackerBridge = {
   app: {
     openDiagnostics: () => ipcRenderer.invoke('app:openDiagnostics'),
     exit: () => ipcRenderer.invoke('app:exit'),
+    openLink: (url) => ipcRenderer.invoke('app:openLink', url),
   },
   calendar: {
     getRange: (query) => ipcRenderer.invoke('calendar:getRange', query),
@@ -57,6 +58,7 @@ const bridge: DayTrackerBridge = {
   },
   events: {
     list: (query) => ipcRenderer.invoke('events:list', query),
+    get: (id) => ipcRenderer.invoke('events:get', id),
     create: (input) => ipcRenderer.invoke('events:create', input),
     update: (id, input) => ipcRenderer.invoke('events:update', id, input),
     delete: (id, version) => ipcRenderer.invoke('events:delete', id, version),
@@ -96,11 +98,24 @@ const bridge: DayTrackerBridge = {
     playlists: () => ipcRenderer.invoke('spotify:playlists'),
     devices: () => ipcRenderer.invoke('spotify:devices'),
     playback: () => ipcRenderer.invoke('spotify:playback'),
+    playlistItems: (playlistId, offset) => ipcRenderer.invoke('spotify:playlistItems', playlistId, offset),
+    likedSongs: (offset) => ipcRenderer.invoke('spotify:likedSongs', offset),
+    queue: (uri) => ipcRenderer.invoke('spotify:queue', uri),
     play: (input) => ipcRenderer.invoke('spotify:play', input),
     pause: () => ipcRenderer.invoke('spotify:pause'),
     next: () => ipcRenderer.invoke('spotify:next'),
     previous: () => ipcRenderer.invoke('spotify:previous'),
+    seek: (positionMs) => ipcRenderer.invoke('spotify:seek', positionMs),
+    volume: (percent) => ipcRenderer.invoke('spotify:volume', percent),
+    shuffle: (on) => ipcRenderer.invoke('spotify:shuffle', on),
+    repeat: (mode) => ipcRenderer.invoke('spotify:repeat', mode),
     transfer: (deviceId) => ipcRenderer.invoke('spotify:transfer', deviceId),
+  },
+  weather: {
+    current: () => ipcRenderer.invoke('weather:current'),
+  },
+  holidays: {
+    list: (year) => ipcRenderer.invoke('holidays:list', year),
   },
 };
 

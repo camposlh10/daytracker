@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { App } from './App';
 import { formatLongDate, formatMonthTitle, todayIso } from './lib/dates';
 import { appSettings, installFakeBridge } from './test/fakeBridge';
+import { currentScreen, goTo, menuItemName } from './test/navigate';
 
 /** Opens the daily review for the selected day from the Create menu. */
 async function openReview(user: ReturnType<typeof userEvent.setup>) {
@@ -83,11 +84,11 @@ describe('App navigation', () => {
     await user.type(within(await openReview(user)).getByLabelText('Wins'), 'Half-written');
     await user.click(screen.getByRole('button', { name: 'Close' }));
 
-    await user.click(screen.getByRole('button', { name: 'Tasks' }));
+    await goTo(user, 'Tasks');
     expect(await screen.findByText('No tasks yet')).toBeInTheDocument();
     expect(screen.queryByRole('grid')).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Calendar' }));
+    await goTo(user, 'Calendar');
     expect(screen.getByRole('grid')).toBeInTheDocument();
     expect(within(await openReview(user)).getByLabelText('Wins')).toHaveValue('Half-written');
   });
@@ -157,13 +158,13 @@ describe('App settings', () => {
     const { bridge } = installFakeBridge({ status: 'ready' });
     bridge.settings.get.mockResolvedValue({ ok: true, data: appSettings({ displayName: 'Ana' }) });
     render(<App />);
-    expect(await screen.findByText('Ana')).toBeInTheDocument();
+    expect(await screen.findByText(/^Good (morning|afternoon|night), Ana$/)).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Progress' }));
+    await goTo(user, 'Progress');
     expect(await screen.findByRole('heading', { level: 1, name: 'Progress' })).toBeInTheDocument();
     expect(bridge.progress.get).toHaveBeenCalled();
 
-    await user.click(screen.getByRole('button', { name: 'Settings' }));
+    await goTo(user, 'Settings');
     expect(await screen.findByRole('heading', { level: 1, name: 'Settings' })).toBeInTheDocument();
     expect(screen.getByLabelText('Display name')).toHaveValue('Ana');
   });
@@ -172,12 +173,66 @@ describe('App settings', () => {
     const user = userEvent.setup();
     installFakeBridge({ status: 'ready' });
     render(<App />);
-    await user.click(await screen.findByRole('button', { name: 'Settings' }));
+    await goTo(user, 'Settings');
 
     await user.type(await screen.findByLabelText('Display name'), 'Bea');
     await user.click(screen.getByRole('button', { name: 'Save settings' }));
 
     expect(await screen.findByText('Settings saved.')).toBeInTheDocument();
-    expect(screen.getAllByText('Bea').length).toBeGreaterThan(0);
+    expect(screen.getByText(/^Good (morning|afternoon|night), Bea$/)).toBeInTheDocument();
+  });
+});
+
+describe('Title bar', () => {
+  it('goes back and forward through the screens visited, and home to the calendar', async () => {
+    const user = userEvent.setup();
+    installFakeBridge({ status: 'ready' });
+    render(<App />);
+    await screen.findByRole('grid');
+    const bar = screen.getByRole('banner');
+    expect(within(bar).getByRole('button', { name: 'Back' })).toBeDisabled();
+
+    await goTo(user, 'Reading');
+    await goTo(user, 'Progress');
+    await user.click(within(bar).getByRole('button', { name: 'Back' }));
+    expect(await currentScreen(user)).toBe('Reading');
+    await user.keyboard('{Alt>}{ArrowLeft}{/Alt}');
+    expect(await currentScreen(user)).toBe('Calendar');
+    await user.click(within(bar).getByRole('button', { name: 'Forward' }));
+    expect(await currentScreen(user)).toBe('Reading');
+
+    await goTo(user, 'Calendar');
+    expect(screen.getByRole('grid')).toBeInTheDocument();
+    // Going somewhere new drops the screens that were ahead.
+    expect(within(bar).getByRole('button', { name: 'Forward' })).toBeDisabled();
+  });
+
+  it('lists every screen in the menu, and opens Settings from the profile button', async () => {
+    const user = userEvent.setup();
+    const { bridge } = installFakeBridge({ status: 'ready' });
+    bridge.settings.get.mockResolvedValue({ ok: true, data: appSettings({ displayName: 'Luiz' }) });
+    render(<App />);
+    await screen.findByRole('grid');
+    const bar = screen.getByRole('banner');
+    expect(within(bar).queryByRole('search')).not.toBeInTheDocument();
+
+    await user.click(within(bar).getByRole('button', { name: 'Menu' }));
+    expect(screen.getAllByRole('menuitemradio').map(menuItemName)).toEqual([
+      'Calendar',
+      'Tasks',
+      'Reading',
+      'Progress',
+      'Music',
+      'Settings',
+    ]);
+    expect(screen.getByRole('menuitemradio', { name: 'Calendar' })).toHaveAttribute('aria-checked', 'true');
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(within(bar).getByRole('button', { name: 'Menu' })).toHaveFocus();
+
+    const profile = await within(bar).findByRole('button', { name: 'Profile and settings for Luiz' });
+    expect(profile).toHaveTextContent('L');
+    await user.click(profile);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Settings' })).toBeInTheDocument();
   });
 });

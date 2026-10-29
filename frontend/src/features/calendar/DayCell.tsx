@@ -1,6 +1,6 @@
-import type { CalendarItem } from '../../api/bridge';
 import { dayOfMonth, formatLongDate, type IsoDate } from '../../lib/dates';
 import { CalendarItemLabel } from './CalendarItemLabel';
+import type { DayItem } from './holidays';
 import styles from './MonthGrid.module.css';
 
 /** Month cells never list more than this; short windows show fewer. */
@@ -9,7 +9,7 @@ export const COMPACT_VISIBLE_ITEMS = 2;
 
 interface DayCellProps {
   date: IsoDate;
-  items: CalendarItem[];
+  items: DayItem[];
   maxVisible: number;
   inMonth: boolean;
   isToday: boolean;

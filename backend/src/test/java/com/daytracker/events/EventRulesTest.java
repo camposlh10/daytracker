@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.groups.Tuple.tuple;
 
 import java.nio.file.Path;
+import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -254,6 +255,140 @@ class EventRulesTest {
 		assertThatThrownBy(() -> events.get(id)).isInstanceOf(NotFoundException.class);
 		assertThatThrownBy(() -> events.delete(id, 2)).isInstanceOf(NotFoundException.class);
 		assertThat(agenda("2026-10-09")).isEmpty();
+	}
+
+	private CalendarEvent repeating(String title, String start, String end, String rule, String until,
+			List<String> dates, List<String> links) {
+		return events.create(new EventRequests.Create(UUID.randomUUID(), title, null, null, false,
+				LocalDateTime.parse(start), LocalDateTime.parse(end), SAO_PAULO, null, null, rule,
+				until == null ? null : LocalDate.parse(until), dates == null ? null : dates.stream().map(LocalDate::parse).toList(),
+				null, links))
+			.event();
+	}
+
+	@Test
+	void anEverydayAppointmentAppearsOnEveryDateUntilItsLastDay() {
+		CalendarEvent standUp = repeating("Stand-up", "2026-10-05T09:00", "2026-10-05T09:15", "DAILY", "2026-10-08",
+				null, null);
+		assertThat(standUp.repeatRule()).isEqualTo("DAILY");
+
+		List<CalendarItemResponse> items = eventItems("2026-10-01", "2026-10-12");
+		assertThat(items).extracting(item -> item.date().toString(), item -> item.startsAt().toString())
+			.containsExactly(tuple("2026-10-05", "2026-10-05T12:00:00Z"), tuple("2026-10-06", "2026-10-06T12:00:00Z"),
+					tuple("2026-10-07", "2026-10-07T12:00:00Z"), tuple("2026-10-08", "2026-10-08T12:00:00Z"));
+		assertThat(items).extracting(CalendarItemResponse::id).containsOnly(standUp.id().toString());
+		assertThat(agenda("2026-10-07")).containsExactly("Stand-up");
+		assertThat(agenda("2026-10-09")).isEmpty();
+	}
+
+	@Test
+	void anEverydayAppointmentWithoutAnEndKeepsGoing() {
+		repeating("Walk", "2026-01-10T18:00", "2026-01-10T19:00", "DAILY", null, null, null);
+
+		// Months later, in a range that does not include the first day.
+		assertThat(eventItems("2026-10-01", "2026-10-04")).extracting(item -> item.date().toString())
+			.containsExactly("2026-10-01", "2026-10-02", "2026-10-03");
+		assertThat(events.overlapping(LocalDate.parse("2026-12-30"), LocalDate.parse("2027-01-02")))
+			.extracting(event -> event.localStart().toString())
+			.containsExactly("2026-12-30T18:00", "2026-12-31T18:00", "2027-01-01T18:00");
+	}
+
+	@Test
+	void chosenDatesAppearOnlyOnThoseDates() {
+		CalendarEvent physio = repeating("Physio", "2026-10-06T14:00", "2026-10-06T15:00", "DATES", null,
+				List.of("2026-10-20", "2026-10-06", "2026-10-13", "2026-10-13"), null);
+		assertThat(physio.repeatDates()).extracting(LocalDate::toString)
+			.containsExactly("2026-10-06", "2026-10-13", "2026-10-20");
+		assertThat(physio.repeatUntil()).isEqualTo(LocalDate.parse("2026-10-20"));
+
+		assertThat(eventItems("2026-10-01", "2026-11-01")).extracting(item -> item.date().toString())
+			.containsExactly("2026-10-06", "2026-10-13", "2026-10-20");
+		assertThat(agenda("2026-10-14")).isEmpty();
+
+		assertThatThrownBy(() -> repeating("Wrong first", "2026-10-06T14:00", "2026-10-06T15:00", "DATES", null,
+				List.of("2026-10-07", "2026-10-13"), null))
+			.isInstanceOf(InvalidInputException.class);
+		assertThatThrownBy(() -> repeating("One date", "2026-10-06T14:00", "2026-10-06T15:00", "DATES", null,
+				List.of("2026-10-06"), null))
+			.isInstanceOf(InvalidInputException.class);
+		assertThatThrownBy(() -> repeating("Weekly", "2026-10-06T14:00", "2026-10-06T15:00", "WEEKLY", null, null,
+				null))
+			.isInstanceOf(InvalidInputException.class);
+		assertThatThrownBy(() -> repeating("Backwards", "2026-10-06T14:00", "2026-10-06T15:00", "DAILY", "2026-10-01",
+				null, null))
+			.isInstanceOf(InvalidInputException.class);
+	}
+
+	@Test
+	void anAllDayRepeatAndOverlapsBetweenOccurrences() {
+		events.create(new EventRequests.Create(UUID.randomUUID(), "Gym week", null, null, true, null, null, null,
+				LocalDate.parse("2026-10-05"), LocalDate.parse("2026-10-06"), "DAILY", LocalDate.parse("2026-10-06"),
+				null, null, null));
+		assertThat(eventItems("2026-10-05", "2026-10-08")).extracting(item -> item.date().toString())
+			.containsExactly("2026-10-05", "2026-10-06");
+
+		// A one-off meeting on the third day clashes with that day's repeat only.
+		repeating("Lunch", "2026-10-05T12:00", "2026-10-05T13:00", "DAILY", null, null, null);
+		timed("Client call", "2026-10-07T12:30", "2026-10-07T13:30", SAO_PAULO);
+		assertThat(eventItems("2026-10-06", "2026-10-08")
+			.stream()
+			.filter(item -> !item.allDay())
+			.toList()).extracting(item -> item.title() + " " + item.date(), CalendarItemResponse::overlapsAnother)
+			.containsExactlyInAnyOrder(tuple("Lunch 2026-10-06", false), tuple("Lunch 2026-10-07", true),
+					tuple("Client call 2026-10-07", true));
+	}
+
+	@Test
+	void linksAreKeptAndOnlyWebAddressesAreAccepted() {
+		CalendarEvent call = repeating("Call", "2026-10-09T10:00", "2026-10-09T11:00", null, null, null,
+				List.of(" https://meet.example.com/abc ", "", "https://meet.example.com/abc", "http://docs.example.org/x?y=1"));
+		assertThat(call.links()).containsExactly("https://meet.example.com/abc", "http://docs.example.org/x?y=1");
+		assertThat(events.get(call.id()).links()).containsExactly("https://meet.example.com/abc",
+				"http://docs.example.org/x?y=1");
+
+		for (String bad : List.of("javascript:alert(1)", "file:///C:/Windows", "meet.example.com", "https://")) {
+			assertThatThrownBy(() -> repeating("Bad", "2026-10-09T10:00", "2026-10-09T11:00", null, null, null,
+					List.of(bad)))
+				.as(bad)
+				.isInstanceOf(InvalidInputException.class);
+		}
+	}
+
+	private CalendarEvent weekly(String title, String start, String end, String until, DayOfWeek... days) {
+		return events.create(new EventRequests.Create(UUID.randomUUID(), title, null, null, false,
+				LocalDateTime.parse(start), LocalDateTime.parse(end), SAO_PAULO, null, null, "WEEKLY",
+				until == null ? null : LocalDate.parse(until), null, List.of(days), null))
+			.event();
+	}
+
+	@Test
+	void aWeeklyAppointmentAppearsOnlyOnItsDaysOfTheWeek() {
+		// 2026-10-05 is a Monday.
+		CalendarEvent gym = weekly("Gym", "2026-10-05T07:00", "2026-10-05T08:00", "2026-10-16", DayOfWeek.FRIDAY,
+				DayOfWeek.MONDAY, DayOfWeek.WEDNESDAY, DayOfWeek.MONDAY);
+		assertThat(gym.repeatWeekdays()).containsExactly(DayOfWeek.MONDAY, DayOfWeek.WEDNESDAY, DayOfWeek.FRIDAY);
+
+		assertThat(eventItems("2026-10-01", "2026-10-31")).extracting(item -> item.date().toString())
+			.containsExactly("2026-10-05", "2026-10-07", "2026-10-09", "2026-10-12", "2026-10-14", "2026-10-16");
+		assertThat(agenda("2026-10-06")).isEmpty();
+		assertThat(agenda("2026-10-07")).containsExactly("Gym");
+	}
+
+	@Test
+	void aWeeklyStartOnAnotherDayMovesToTheFirstChosenDay() {
+		// Saturday the 10th, repeated on Tuesdays: it starts on Tuesday the 13th, same time.
+		CalendarEvent lesson = weekly("Lesson", "2026-10-10T19:00", "2026-10-10T20:30", null, DayOfWeek.TUESDAY);
+		assertThat(lesson.localStart()).isEqualTo(LocalDateTime.parse("2026-10-13T19:00"));
+		assertThat(lesson.localEnd()).isEqualTo(LocalDateTime.parse("2026-10-13T20:30"));
+		assertThat(eventItems("2026-10-01", "2026-11-01")).extracting(item -> item.date().toString())
+			.containsExactly("2026-10-13", "2026-10-20", "2026-10-27");
+
+		assertThatThrownBy(() -> weekly("No days", "2026-10-10T19:00", "2026-10-10T20:00", null))
+			.isInstanceOf(InvalidInputException.class);
+		assertThatThrownBy(() -> events.create(new EventRequests.Create(UUID.randomUUID(), "Daily with days", null,
+				null, false, LocalDateTime.parse("2026-10-10T19:00"), LocalDateTime.parse("2026-10-10T20:00"), SAO_PAULO,
+				null, null, "DAILY", null, null, List.of(DayOfWeek.MONDAY), null)))
+			.isInstanceOf(InvalidInputException.class);
 	}
 
 }

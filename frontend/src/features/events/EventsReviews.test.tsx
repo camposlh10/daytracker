@@ -72,13 +72,51 @@ describe('EventDialog', () => {
     return { ...fake, onClose, onSaved, user: userEvent.setup() };
   }
 
-  it('creates a timed appointment across midnight in the chosen timezone', async () => {
+  it('lasts an hour unless an end is set, without asking for a timezone', async () => {
+    const { bridge, user, onClose } = open({ kind: 'create', date: '2026-10-09' });
+    bridge.events.create.mockResolvedValue({ ok: true, data: calendarEvent() });
+
+    expect(screen.queryByLabelText(/Timezone/)).not.toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'Set an end' })).not.toBeChecked();
+    expect(screen.queryByLabelText('End time')).not.toBeInTheDocument();
+    expect(screen.getByText('Otherwise it lasts an hour.')).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Title'), 'Late call');
+    await user.clear(screen.getByLabelText('Start time'));
+    await user.type(screen.getByLabelText('Start time'), '23:30');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    // The hour runs past midnight into the next day, in this computer's timezone.
+    expect(bridge.events.create).toHaveBeenCalledWith(
+      expect.objectContaining({ start: '2026-10-09T23:30', end: '2026-10-10T00:30', timezone: 'UTC' }),
+    );
+  });
+
+  it('adds a description only when asked', async () => {
+    const { bridge, user, onClose } = open({ kind: 'create', date: '2026-10-09' });
+    bridge.events.create.mockResolvedValue({ ok: true, data: calendarEvent() });
+
+    expect(screen.queryByLabelText('Description (optional)')).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText('Title'), 'Dentist');
+    await user.click(screen.getByRole('button', { name: '+ Add description' }));
+    expect(screen.getByLabelText('Description (optional)')).toHaveFocus();
+    await user.keyboard('Bring the forms');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(bridge.events.create).toHaveBeenCalledWith(expect.objectContaining({ notes: 'Bring the forms' }));
+  });
+
+  it('creates a timed appointment across midnight with an end that is set', async () => {
     const { bridge, user, onClose } = open({ kind: 'create', date: '2026-10-09' });
     bridge.events.create.mockResolvedValue({ ok: true, data: calendarEvent() });
 
     await user.type(screen.getByLabelText('Title'), 'Party');
     await user.clear(screen.getByLabelText('Start time'));
     await user.type(screen.getByLabelText('Start time'), '22:00');
+    await user.click(screen.getByRole('switch', { name: 'Set an end' }));
+    // The end starts from the default hour.
+    expect(screen.getByLabelText('End time')).toHaveValue('23:00');
     await user.clear(screen.getByLabelText('End date'));
     await user.type(screen.getByLabelText('End date'), '2026-10-10');
     await user.clear(screen.getByLabelText('End time'));
@@ -95,6 +133,11 @@ describe('EventDialog', () => {
       start: '2026-10-09T22:00',
       end: '2026-10-10T02:00',
       timezone: 'UTC',
+      repeat: null,
+      repeatUntil: null,
+      repeatDates: [],
+      repeatWeekdays: [],
+      links: [],
     });
   });
 
@@ -102,6 +145,7 @@ describe('EventDialog', () => {
     const { bridge, user, onClose } = open({ kind: 'create', date: '2026-10-09' });
 
     await user.type(screen.getByLabelText('Title'), 'Backwards');
+    await user.click(screen.getByRole('switch', { name: 'Set an end' }));
     await user.clear(screen.getByLabelText('End time'));
     await user.type(screen.getByLabelText('End time'), '08:00');
     await user.click(screen.getByRole('button', { name: 'Save' }));
@@ -118,6 +162,7 @@ describe('EventDialog', () => {
     await user.type(screen.getByLabelText('Title'), 'Trip');
     await user.click(screen.getByLabelText('All day'));
     expect(screen.queryByLabelText('Start time')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('switch', { name: 'Lasts more than one day' }));
     await user.clear(screen.getByLabelText('Last day'));
     await user.type(screen.getByLabelText('Last day'), '2026-10-11');
     await user.click(screen.getByRole('button', { name: 'Save' }));
@@ -144,7 +189,8 @@ describe('EventDialog', () => {
     bridge.events.update.mockResolvedValue({ ok: true, data: lisbon });
 
     expect(screen.getByLabelText('Start time')).toHaveValue('16:00');
-    expect(screen.getByLabelText('Timezone of these times')).toHaveValue('Europe/Lisbon');
+    // Its half-hour end is not the default, so it is shown.
+    expect(screen.getByRole('switch', { name: 'Set an end' })).toBeChecked();
     await user.clear(screen.getByLabelText('End time'));
     await user.type(screen.getByLabelText('End time'), '17:00');
     await user.click(screen.getByRole('button', { name: 'Save' }));
@@ -153,6 +199,30 @@ describe('EventDialog', () => {
       expect(bridge.events.update).toHaveBeenCalledWith(
         lisbon.id,
         expect.objectContaining({ version: 3, start: '2026-10-09T16:00', end: '2026-10-09T17:00', timezone: 'Europe/Lisbon' }),
+      ),
+    );
+  });
+
+  it('shows an existing description, and keeps an hour-long appointment without an end', async () => {
+    const { bridge, user } = open({
+      kind: 'edit',
+      event: calendarEvent({ notes: 'Room 4', localStart: '2026-10-09T09:00:00', localEnd: '2026-10-09T10:00:00', version: 2 }),
+    });
+    bridge.events.update.mockResolvedValue({ ok: true, data: calendarEvent() });
+
+    expect(screen.getByLabelText('Description (optional)')).toHaveValue('Room 4');
+    expect(screen.getByRole('switch', { name: 'Set an end' })).not.toBeChecked();
+    // Turning the end on and off again is not a change.
+    await user.click(screen.getByRole('switch', { name: 'Set an end' }));
+    await user.click(screen.getByRole('switch', { name: 'Set an end' }));
+    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
+    await user.clear(screen.getByLabelText('Start time'));
+    await user.type(screen.getByLabelText('Start time'), '11:00');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() =>
+      expect(bridge.events.update).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ start: '2026-10-09T11:00', end: '2026-10-09T12:00' }),
       ),
     );
   });
@@ -166,6 +236,147 @@ describe('EventDialog', () => {
     expect(screen.getByLabelText('All day')).toBeChecked();
     expect(screen.getByLabelText('First day')).toHaveValue('2026-10-09');
     expect(screen.getByLabelText('Last day')).toHaveValue('2026-10-11');
+  });
+
+  it('repeats every day, until a last day or without end', async () => {
+    const { bridge, user, onClose } = open({ kind: 'create', date: '2026-10-09' });
+    bridge.events.create.mockResolvedValue({ ok: true, data: calendarEvent() });
+
+    await user.type(screen.getByLabelText('Title'), 'Stand-up');
+    await user.selectOptions(screen.getByLabelText('Repeat'), 'Every day');
+    expect(screen.getByText('Leave empty to repeat every day.')).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Until (optional)'), '2026-10-01');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('The last day cannot be before the first.');
+    expect(bridge.events.create).not.toHaveBeenCalled();
+
+    await user.clear(screen.getByLabelText('Until (optional)'));
+    await user.type(screen.getByLabelText('Until (optional)'), '2026-10-31');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(bridge.events.create).toHaveBeenCalledWith(
+      expect.objectContaining({ start: '2026-10-09T09:00', repeat: 'DAILY', repeatUntil: '2026-10-31', repeatDates: [] }),
+    );
+  });
+
+  it('repeats on chosen days of the week, starting with the start date\'s day', async () => {
+    const { bridge, user, onClose } = open({ kind: 'create', date: '2026-10-09' });
+    bridge.events.create.mockResolvedValue({ ok: true, data: calendarEvent() });
+
+    await user.type(screen.getByLabelText('Title'), 'Gym');
+    await user.selectOptions(screen.getByLabelText('Repeat'), 'On days of the week');
+    const days = screen.getByRole('group', { name: 'Days of the week' });
+    // October 9, 2026 is a Friday; the week starts on Monday by default.
+    expect(within(days).getAllByRole('button').map((day) => day.getAttribute('aria-label'))).toEqual([
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday',
+    ]);
+    expect(within(days).getByRole('button', { name: 'Friday' })).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(within(days).getByRole('button', { name: 'Friday' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Choose at least one day of the week.');
+
+    await user.click(within(days).getByRole('button', { name: 'Wednesday' }));
+    await user.click(within(days).getByRole('button', { name: 'Monday' }));
+    await user.type(screen.getByLabelText('Until (optional)'), '2026-12-18');
+    expect(screen.getByText('Leave empty to repeat every week.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(bridge.events.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repeat: 'WEEKLY',
+        repeatWeekdays: ['WEDNESDAY', 'MONDAY'],
+        repeatUntil: '2026-12-18',
+        repeatDates: [],
+      }),
+    );
+  });
+
+  it('repeats on dates chosen by pressing them, the first being the start', async () => {
+    const { bridge, user, onClose } = open({ kind: 'create', date: '2026-10-09' });
+    bridge.events.create.mockResolvedValue({ ok: true, data: calendarEvent() });
+
+    await user.type(screen.getByLabelText('Title'), 'Physio');
+    await user.selectOptions(screen.getByLabelText('Repeat'), 'On dates I choose');
+    expect(screen.queryByLabelText('Start date')).not.toBeInTheDocument();
+    const picker = screen.getByRole('group', { name: 'Dates of the appointment' });
+    // The form's date is chosen to begin with.
+    expect(within(picker).getByRole('button', { name: 'Friday, October 9, 2026' })).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('Choose at least two dates');
+
+    await user.click(within(picker).getByRole('button', { name: 'Thursday, October 22, 2026' }));
+    await user.click(within(picker).getByRole('button', { name: 'Monday, October 5, 2026' }));
+    await user.click(within(picker).getByRole('button', { name: 'Next month' }));
+    await user.click(within(picker).getByRole('button', { name: 'Tuesday, November 3, 2026' }));
+    // Pressing a chosen date again drops it.
+    await user.click(within(picker).getByRole('button', { name: 'Remove Thursday, October 22, 2026' }));
+    expect(within(picker).getByRole('list', { name: 'Chosen dates' })).toHaveTextContent(/Oct 5.*Oct 9.*Nov 3/);
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(bridge.events.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        start: '2026-10-05T09:00',
+        end: '2026-10-05T10:00',
+        repeat: 'DATES',
+        repeatUntil: null,
+        repeatDates: ['2026-10-05', '2026-10-09', '2026-11-03'],
+      }),
+    );
+  });
+
+  it('adds links, refusing anything that is not a web address', async () => {
+    const { bridge, user, onClose } = open({ kind: 'create', date: '2026-10-09' });
+    bridge.events.create.mockResolvedValue({ ok: true, data: calendarEvent() });
+
+    await user.type(screen.getByLabelText('Title'), 'Call');
+    expect(screen.queryByLabelText('Link 1')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '+ Add link' }));
+    expect(screen.getByLabelText('Link 1')).toHaveFocus();
+    await user.keyboard('meet.example.com/abc');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+    expect(screen.getByText('Links must be web addresses that start with https:// or http://.')).toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText('Link 1'));
+    await user.type(screen.getByLabelText('Link 1'), 'https://meet.example.com/abc');
+    await user.click(screen.getByRole('button', { name: '+ Add another link' }));
+    await user.click(screen.getByRole('button', { name: '+ Add another link' }));
+    await user.type(screen.getByLabelText('Link 3'), 'https://docs.example.org/agenda');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    // The empty row is left out.
+    expect(bridge.events.create).toHaveBeenCalledWith(
+      expect.objectContaining({ links: ['https://meet.example.com/abc', 'https://docs.example.org/agenda'] }),
+    );
+  });
+
+  it('edits a repeating appointment as a whole, with its dates and links', () => {
+    open({
+      kind: 'edit',
+      event: calendarEvent({
+        localStart: '2026-10-06T14:00:00',
+        localEnd: '2026-10-06T15:00:00',
+        repeat: 'DATES',
+        repeatUntil: '2026-10-20',
+        repeatDates: ['2026-10-06', '2026-10-13', '2026-10-20'],
+        links: ['https://clinic.example.com'],
+      }),
+    });
+
+    expect(screen.getByText(/On 3 chosen dates\. Changes apply to every date it repeats on\./)).toBeInTheDocument();
+    expect(screen.getByLabelText('Repeat')).toHaveValue('DATES');
+    expect(screen.getByRole('list', { name: 'Chosen dates' })).toHaveTextContent(/Oct 6.*Oct 13.*Oct 20/);
+    expect(screen.getByLabelText('Link 1')).toHaveValue('https://clinic.example.com');
   });
 
   it('deletes only after confirmation and treats an already deleted appointment as deleted', async () => {

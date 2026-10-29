@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.daytracker.common.ApiExceptions.InvalidInputException;
 import com.daytracker.events.CalendarEvent;
+import com.daytracker.events.EventOccurrences;
 import com.daytracker.events.EventRepository;
 import com.daytracker.events.EventResponse;
 import com.daytracker.reading.ReadingGoals.GoalService;
@@ -105,9 +106,12 @@ public class CalendarService {
 				reviews.find(date).orElse(null));
 	}
 
+	/** Each appointment as it appears in the range, with every occurrence of the repeating ones. */
 	private List<CalendarEvent> overlappingEvents(LocalDate from, LocalDate toExclusive) {
-		return events.findOverlapping(from, toExclusive, from.atStartOfDay(zonePolicy.zone()).toInstant(),
-				toExclusive.atStartOfDay(zonePolicy.zone()).toInstant());
+		return EventOccurrences.expand(
+				events.findOverlapping(from, toExclusive, from.atStartOfDay(zonePolicy.zone()).toInstant(),
+						toExclusive.atStartOfDay(zonePolicy.zone()).toInstant()),
+				from, toExclusive, zonePolicy.zone());
 	}
 
 }

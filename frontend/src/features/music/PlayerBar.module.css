@@ -1,0 +1,285 @@
+/* The player along the bottom of the window, in three parts like Spotify's. */
+.bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-4);
+  min-height: 84px;
+  padding: var(--space-3) var(--space-4) var(--space-2);
+  background: var(--color-sidebar);
+  border-top: 1px solid var(--color-border);
+}
+
+.setup {
+  display: flex;
+  justify-content: space-between;
+  min-height: 56px;
+}
+
+.muted {
+  color: var(--color-text-secondary);
+}
+
+.setupButton {
+  padding: var(--space-2) var(--space-4);
+  background: none;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  color: var(--color-text);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.setupButton:hover {
+  background: var(--color-elevated);
+}
+
+/* What is playing. */
+.left {
+  min-width: 0;
+}
+
+.track {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 100%;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.track > :first-child {
+  flex-shrink: 0;
+  width: 56px;
+  height: 56px;
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.name,
+.artist {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.name {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.track:hover .name {
+  text-decoration: underline;
+}
+
+.artist {
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+}
+
+/* The controls and the position. */
+.center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  max-width: 720px;
+  justify-self: center;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.icon {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 999px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.icon:hover:not(:disabled) {
+  color: var(--color-text);
+}
+
+.icon:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* A toggle that is on: shuffle, repeat. */
+.on,
+.on:hover:not(:disabled) {
+  color: var(--color-primary-hover);
+}
+
+.on::after {
+  position: absolute;
+  bottom: 1px;
+  width: 4px;
+  height: 4px;
+  background: currentColor;
+  border-radius: 999px;
+  content: '';
+}
+
+.one {
+  position: absolute;
+  top: 3px;
+  right: 2px;
+  font-size: 0.55rem;
+  font-weight: 700;
+}
+
+.play,
+.play:hover:not(:disabled) {
+  width: 36px;
+  height: 36px;
+  background: var(--color-text);
+  color: var(--color-app-bg);
+}
+
+.play:hover:not(:disabled) {
+  transform: scale(1.05);
+}
+
+.progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.time {
+  min-width: 3.2em;
+  color: var(--color-text-secondary);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.seek {
+  flex: 1;
+}
+
+/* The device and the volume. */
+.right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.device {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+}
+
+.device svg {
+  flex-shrink: 0;
+}
+
+.deviceName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.volume {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.volumeSlider {
+  width: 96px;
+}
+
+/* A thin track that fills up to the value, and shows its handle on hover or focus. */
+.slider {
+  --fill: 0%;
+  height: 12px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  appearance: none;
+}
+
+.slider:disabled {
+  cursor: default;
+}
+
+.slider::-webkit-slider-runnable-track {
+  height: 4px;
+  background: linear-gradient(to right, var(--color-text) var(--fill), var(--color-elevated) var(--fill));
+  border-radius: 999px;
+}
+
+.slider:hover:not(:disabled)::-webkit-slider-runnable-track,
+.slider:focus-visible::-webkit-slider-runnable-track {
+  background: linear-gradient(to right, var(--color-primary) var(--fill), var(--color-elevated) var(--fill));
+}
+
+.slider::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  background: var(--color-text);
+  border: none;
+  border-radius: 999px;
+  opacity: 0;
+  appearance: none;
+}
+
+.slider:hover:not(:disabled)::-webkit-slider-thumb,
+.slider:focus-visible::-webkit-slider-thumb {
+  opacity: 1;
+}
+
+.slider:focus-visible {
+  border-radius: 999px;
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+@media (forced-colors: active) {
+  .play {
+    border: 1px solid ButtonText;
+  }
+
+  .slider::-webkit-slider-runnable-track {
+    background: CanvasText;
+  }
+
+  .slider::-webkit-slider-thumb {
+    background: Highlight;
+    opacity: 1;
+  }
+}

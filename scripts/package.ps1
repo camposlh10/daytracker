@@ -64,6 +64,10 @@ Invoke-Step $desktop {
     if ($LASTEXITCODE -eq 0 -and -not $SkipTests) { & node (Join-Path $root 'scripts\lifecycle-test.mjs') }
     # The Spotify client against a fake Spotify: sign-in, tokens, playback control, errors.
     if ($LASTEXITCODE -eq 0 -and -not $SkipTests) { & node (Join-Path $root 'scripts\spotify-test.mjs') }
+    # The weather service against a fake weather service: rounding, caching, units, errors.
+    if ($LASTEXITCODE -eq 0 -and -not $SkipTests) { & node (Join-Path $root 'scripts\weather-test.mjs') }
+    # The holiday service against a fake holiday service: country, caching, offline.
+    if ($LASTEXITCODE -eq 0 -and -not $SkipTests) { & node (Join-Path $root 'scripts\holiday-test.mjs') }
     if ($LASTEXITCODE -eq 0) {
         if ($LocalInstaller) { & npx electron-builder --win nsis --x64 '-c.win.signAndEditExecutable=false' '-c.directories.output=release-installer' }
         elseif ($LocalRun) { & npm run pack -- '-c.win.signAndEditExecutable=false' '-c.asar=false' }

@@ -1,8 +1,7 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { spotifyApi, spotifyImageUrl } from '../../api/client';
 import type {
   SpotifyDevice,
-  SpotifyPlayback,
   SpotifyPlaylist,
   SpotifySearchResult,
   SpotifyTrack,
@@ -10,10 +9,12 @@ import type {
 import { Button } from '../../components/Button';
 import { LoadingState } from '../../components/States';
 import form from '../../components/form.module.css';
+import { Library, type LibrarySource } from './Library';
 import { DEFAULT_REDIRECT_URI, type SpotifyState } from './useSpotify';
 import styles from './music.module.css';
 
-function Art({ imageId, label }: { imageId: string | null; label: string }) {
+/** Album art, or the first letter of the name when there is none. */
+export function Art({ imageId, label }: { imageId: string | null; label: string }) {
   const url = spotifyImageUrl(imageId);
   const [failed, setFailed] = useState<string | null>(null);
   return url && url !== failed ? (
@@ -25,14 +26,18 @@ function Art({ imageId, label }: { imageId: string | null; label: string }) {
   );
 }
 
-function duration(ms: number): string {
+/** 3:05, or 10:10:08 for something an hour or longer. */
+export function duration(ms: number): string {
   const seconds = Math.round(ms / 1000);
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  const two = (value: number) => String(value).padStart(2, '0');
+  return seconds >= 3600
+    ? `${Math.floor(seconds / 3600)}:${two(Math.floor(seconds / 60) % 60)}:${two(seconds % 60)}`
+    : `${Math.floor(seconds / 60)}:${two(seconds % 60)}`;
 }
 
 /**
- * Spotify: set up the connection, see and control what plays, search, and start
- * playlists. Sound comes from one of the user's Spotify devices (Spotify Connect);
+ * Spotify: set up the connection, see and control what plays, search, and browse
+ * Liked Songs and playlists to pick songs. Sound comes from one of the user's Spotify devices (Spotify Connect);
  * when none is playing, the desktop side starts Spotify on this computer by itself.
  */
 export function MusicPage({ spotify }: { spotify: SpotifyState }) {
@@ -191,12 +196,14 @@ function Connect({ spotify }: { spotify: SpotifyState }) {
 function Connected({ spotify }: { spotify: SpotifyState }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SpotifySearchResult | null>(null);
-  const [playlists, setPlaylists] = useState<SpotifyPlaylist[] | null>(null);
+  // Liked Songs or the playlist open in the library.
+  const [source, setSource] = useState<LibrarySource | null>(null);
   const [devices, setDevices] = useState<SpotifyDevice[] | null>(null);
   const [deviceId, setDeviceId] = useState('');
 
   const play = (uri: string) =>
     void spotify.run(() => spotifyApi.play({ uri, ...(deviceId ? { deviceId } : {}) }));
+  const queue = (uri: string) => void spotify.run(() => spotifyApi.queue(uri));
 
   const search = (event: FormEvent) => {
     event.preventDefault();
@@ -267,14 +274,19 @@ function Connected({ spotify }: { spotify: SpotifyState }) {
             {results.tracks.length > 0 && (
               <ul className={styles.list} aria-label="Songs">
                 {results.tracks.map((track) => (
-                  <TrackRow key={track.uri} track={track} onPlay={() => play(track.uri)} />
+                  <TrackRow key={track.uri} track={track} onPlay={() => play(track.uri)} onQueue={() => queue(track.uri)} />
                 ))}
               </ul>
             )}
             {results.playlists.length > 0 && (
               <ul className={styles.list} aria-label="Playlists found">
                 {results.playlists.map((playlist) => (
-                  <PlaylistRow key={playlist.uri} playlist={playlist} onPlay={() => play(playlist.uri)} />
+                  <PlaylistRow
+                    key={playlist.uri}
+                    playlist={playlist}
+                    onPlay={() => play(playlist.uri)}
+                    onOpen={() => setSource({ kind: 'playlist', playlist })}
+                  />
                 ))}
               </ul>
             )}
@@ -282,22 +294,7 @@ function Connected({ spotify }: { spotify: SpotifyState }) {
         )}
       </section>
 
-      <section className={styles.card} aria-labelledby="spotify-playlists">
-        <h2 id="spotify-playlists">Your playlists</h2>
-        {playlists === null ? (
-          <Button onClick={() => void spotify.run(async () => setPlaylists(await spotifyApi.playlists()))}>
-            Show my playlists
-          </Button>
-        ) : playlists.length === 0 ? (
-          <p className={styles.muted}>No playlists.</p>
-        ) : (
-          <ul className={styles.list} aria-label="Your playlists">
-            {playlists.map((playlist) => (
-              <PlaylistRow key={playlist.uri} playlist={playlist} onPlay={() => play(playlist.uri)} />
-            ))}
-          </ul>
-        )}
-      </section>
+      <Library spotify={spotify} deviceId={deviceId} source={source} onSource={setSource} />
     </>
   );
 }
@@ -311,7 +308,7 @@ function NowPlaying({ spotify }: { spotify: SpotifyState }) {
       <div className={styles.now}>
         <Art imageId={track?.imageId ?? null} label={track?.name ?? ''} />
         <div className={styles.nowText}>
-          <strong>{track ? track.name : playback ? 'Something other than a song' : 'Nothing is playing'}</strong>
+          <strong>{track ? track.name : playback ? 'Something other than a song or episode' : 'Nothing is playing'}</strong>
           {track && <span className={styles.muted}>{track.artists}</span>}
           {playback?.deviceName && <span className={styles.muted}>On {playback.deviceName}</span>}
         </div>
@@ -321,8 +318,8 @@ function NowPlaying({ spotify }: { spotify: SpotifyState }) {
   );
 }
 
-/** Previous, play or pause, next. Shared by the Music page and the sidebar. */
-export function Controls({ spotify }: { spotify: SpotifyState }) {
+/** Previous, play or pause, next. */
+function Controls({ spotify }: { spotify: SpotifyState }) {
   const playing = spotify.playback?.isPlaying === true;
   return (
     <div className={styles.controls} role="group" aria-label="Playback">
@@ -344,7 +341,7 @@ export function Controls({ spotify }: { spotify: SpotifyState }) {
   );
 }
 
-function TrackRow({ track, onPlay }: { track: SpotifyTrack; onPlay: () => void }) {
+function TrackRow({ track, onPlay, onQueue }: { track: SpotifyTrack; onPlay: () => void; onQueue: () => void }) {
   return (
     <li className={styles.row}>
       <Art imageId={track.imageId} label={track.name} />
@@ -358,11 +355,14 @@ function TrackRow({ track, onPlay }: { track: SpotifyTrack; onPlay: () => void }
       <Button aria-label={`Play ${track.name}`} onClick={onPlay}>
         ▶ Play
       </Button>
+      <Button aria-label={`Add ${track.name} to the queue`} onClick={onQueue}>
+        + Queue
+      </Button>
     </li>
   );
 }
 
-function PlaylistRow({ playlist, onPlay }: { playlist: SpotifyPlaylist; onPlay: () => void }) {
+function PlaylistRow({ playlist, onPlay, onOpen }: { playlist: SpotifyPlaylist; onPlay: () => void; onOpen: () => void }) {
   return (
     <li className={styles.row}>
       <Art imageId={playlist.imageId} label={playlist.name} />
@@ -373,118 +373,12 @@ function PlaylistRow({ playlist, onPlay }: { playlist: SpotifyPlaylist; onPlay: 
           {playlist.trackCount !== null ? ` · ${playlist.trackCount} songs` : ''}
         </span>
       </span>
+      <Button aria-label={`Show the songs of ${playlist.name}`} onClick={onOpen}>
+        Songs
+      </Button>
       <Button aria-label={`Play ${playlist.name}`} onClick={onPlay}>
         ▶ Play
       </Button>
     </li>
-  );
-}
-
-/**
- * Where the song is now. Spotify is asked every few seconds; in between, the
- * position moves on by itself while the song plays.
- */
-function useLivePosition(playback: SpotifyPlayback | null): number {
-  const [anchor, setAnchor] = useState(() => ({ progress: playback?.progressMs ?? 0, at: Date.now() }));
-  const [, setTick] = useState(0);
-  const playing = playback?.isPlaying === true;
-
-  useEffect(() => {
-    setAnchor({ progress: playback?.progressMs ?? 0, at: Date.now() });
-  }, [playback]);
-
-  useEffect(() => {
-    if (!playing) {
-      return;
-    }
-    const timer = setInterval(() => setTick((tick) => tick + 1), 1000);
-    return () => clearInterval(timer);
-  }, [playing]);
-
-  const length = playback?.track?.durationMs ?? 0;
-  return Math.min(anchor.progress + (playing ? Date.now() - anchor.at : 0), length);
-}
-
-/**
- * The player at the bottom of the sidebar: the song, its artist and cover, how
- * far it has played, and previous, play or pause, and next. Before Spotify is
- * connected it only offers to set it up.
- */
-export function MiniPlayer({ spotify, onOpen }: { spotify: SpotifyState; onOpen: () => void }) {
-  const { playback } = spotify;
-  const track = playback?.track ?? null;
-  const position = useLivePosition(playback);
-  const playing = playback?.isPlaying === true;
-
-  if (!spotify.status) {
-    return null;
-  }
-  if (!spotify.status.connected) {
-    return (
-      <button type="button" className={styles.miniSetup} onClick={onOpen}>
-        <span aria-hidden="true">♪</span> Set up Spotify
-      </button>
-    );
-  }
-
-  return (
-    <section className={styles.mini} aria-label="Now playing on Spotify">
-      <button
-        type="button"
-        className={styles.miniTrack}
-        title={track ? `${track.name} · ${track.artists}` : 'Open Music'}
-        onClick={onOpen}
-      >
-        <Art imageId={track?.imageId ?? null} label={track?.name ?? '♪'} />
-        <span className={styles.miniText}>
-          <span className={styles.miniName}>{track ? track.name : 'Nothing playing'}</span>
-          <span className={styles.miniArtist}>{track ? track.artists : 'Pick music on the Music page'}</span>
-        </span>
-      </button>
-      {track && (
-        <div className={styles.miniProgress}>
-          <progress
-            className={styles.miniBar}
-            value={position}
-            max={track.durationMs}
-            aria-label="Song position"
-            aria-valuetext={`${duration(position)} of ${duration(track.durationMs)}`}
-          />
-          <div className={styles.miniTimes} aria-hidden="true">
-            <span>{duration(position)}</span>
-            <span>{duration(track.durationMs)}</span>
-          </div>
-        </div>
-      )}
-      <div className={styles.miniControls} role="group" aria-label="Playback">
-        <button
-          type="button"
-          className={styles.miniButton}
-          aria-label="Previous song"
-          disabled={spotify.busy}
-          onClick={() => void spotify.run(spotifyApi.previous)}
-        >
-          ⏮
-        </button>
-        <button
-          type="button"
-          className={`${styles.miniButton} ${styles.miniPlay}`}
-          aria-label={playing ? 'Pause' : 'Play'}
-          disabled={spotify.busy}
-          onClick={() => void spotify.run(() => (playing ? spotifyApi.pause() : spotifyApi.play()))}
-        >
-          {playing ? '⏸' : '▶'}
-        </button>
-        <button
-          type="button"
-          className={styles.miniButton}
-          aria-label="Next song"
-          disabled={spotify.busy}
-          onClick={() => void spotify.run(spotifyApi.next)}
-        >
-          ⏭
-        </button>
-      </div>
-    </section>
   );
 }

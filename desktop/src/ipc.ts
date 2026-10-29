@@ -1,6 +1,9 @@
 import { ipcMain, type IpcMainInvokeEvent } from 'electron';
 import type { BackendManager } from './backend';
+import type { SpotifyRepeat } from './shared/bridge-types';
 import type { SpotifyClient } from './spotifyClient';
+import type { HolidayService } from './holidays';
+import type { WeatherService } from './weather';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -9,8 +12,16 @@ const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH'];
 const STATUSES = ['PENDING', 'IN_PROGRESS', 'DONE'];
 const BOOK_STATUSES = ['TO_READ', 'READING', 'FINISHED', 'ABANDONED'];
 const TIME_FORMATS = ['H12', 'H24'];
-const SPOTIFY_URI = /^spotify:(track|album|playlist|artist):[A-Za-z0-9]{22}$/;
+const SPOTIFY_URI = /^spotify:(track|episode|album|playlist|artist):[A-Za-z0-9]{22}$/;
+const SPOTIFY_SONG = /^spotify:(track|episode):[A-Za-z0-9]{22}$/;
+const SPOTIFY_CONTEXT = /^spotify:(album|playlist|artist):[A-Za-z0-9]{22}$/;
+const SPOTIFY_ID = /^[A-Za-z0-9]{22}$/;
+// Spotify plays at most this many songs from a list.
+const MAX_PLAY_URIS = 100;
 const SPOTIFY_DEVICE = /^[A-Za-z0-9_-]{1,128}$/;
+const SPOTIFY_REPEAT = ['off', 'context', 'track'];
+// Spotify's longest episodes run for many hours; a day is a generous bound.
+const MAX_POSITION_MS = 24 * 60 * 60 * 1000;
 const EXPORT_DATASETS = ['tasks', 'reading-sessions', 'appointments', 'summaries'];
 const BACKUP_NAME = /^(manual|auto|pre-migration|safety)-[A-Za-z0-9-]+\.db$/;
 const MAX_INTEGER = 1_000_000;
@@ -18,6 +29,12 @@ const MAX_INTEGER = 1_000_000;
 const MAX_TITLE_CHARS = 2_000;
 const MAX_DESCRIPTION_CHARS = 20_000;
 const MAX_SHORT_TEXT_CHARS = 500;
+const EVENT_REPEATS = ['DAILY', 'WEEKLY', 'DATES'];
+const WEEKDAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
+// Generous transport bounds; the backend applies the real rules.
+const MAX_REPEAT_DATES = 400;
+const MAX_LINKS = 20;
+const MAX_LINK_CHARS = 2_000;
 
 export interface IpcContext {
   backend: BackendManager;
@@ -30,6 +47,10 @@ export interface IpcContext {
   openBackupFolder(): Promise<void>;
   restoreBackup(): Promise<unknown>;
   spotify: SpotifyClient;
+  weather: WeatherService;
+  holidays: HolidayService;
+  /** Opens a checked http or https address in the default browser. */
+  openLink(url: string): Promise<unknown>;
   server: {
     describe(): Promise<unknown>;
     test(url: string, token: string): Promise<unknown>;
@@ -71,6 +92,7 @@ export function registerIpc(context: IpcContext): void {
   handle('backend:restart', () => backend.restart());
   handle('app:openDiagnostics', () => context.openDiagnostics());
   handle('app:exit', () => context.exit());
+  handle('app:openLink', (url) => context.openLink(parseText(url, 'url', MAX_LINK_CHARS)));
 
   handle('calendar:getRange', (query) => backend.request('GET', `/api/v1/calendar?${dateRange(query)}`));
   handle('calendar:getDay', (date) => backend.request('GET', `/api/v1/days/${parseDate(date, 'date')}`));
@@ -139,6 +161,7 @@ export function registerIpc(context: IpcContext): void {
   );
 
   handle('events:list', (query) => backend.request('GET', `/api/v1/events?${dateRange(query)}`));
+  handle('events:get', (id) => backend.request('GET', `/api/v1/events/${parseUuid(id, 'id')}`));
   handle('events:create', (input) => backend.request('POST', '/api/v1/events', createEvent(input)));
   handle('events:update', (id, input) =>
     backend.request('PATCH', `/api/v1/events/${parseUuid(id, 'id')}`, updateEvent(input)),
@@ -211,13 +234,30 @@ export function registerIpc(context: IpcContext): void {
     const fields = input === undefined || input === null ? {} : asRecord(input);
     return spotify.play({
       uri: fields.uri === undefined ? undefined : parsePattern(fields.uri, 'uri', SPOTIFY_URI),
+      contextUri: fields.contextUri === undefined ? undefined : parsePattern(fields.contextUri, 'contextUri', SPOTIFY_CONTEXT),
+      uris:
+        fields.uris === undefined
+          ? undefined
+          : parseList(fields.uris, 'uris', MAX_PLAY_URIS, (uri) => parsePattern(uri, 'uris', SPOTIFY_SONG)),
       deviceId: fields.deviceId === undefined ? undefined : parsePattern(fields.deviceId, 'deviceId', SPOTIFY_DEVICE),
     });
   });
+  handle('spotify:playlistItems', (playlistId, offset) =>
+    spotify.playlistItems(parsePattern(playlistId, 'playlistId', SPOTIFY_ID), offset === undefined ? 0 : parseInteger(offset, 'offset', 0, 100_000)),
+  );
+  handle('spotify:likedSongs', (offset) => spotify.likedSongs(offset === undefined ? 0 : parseInteger(offset, 'offset', 0, 100_000)));
+  handle('spotify:queue', (uri) => spotify.queue(parsePattern(uri, 'uri', SPOTIFY_SONG)));
   handle('spotify:pause', () => spotify.pause());
   handle('spotify:next', () => spotify.next());
   handle('spotify:previous', () => spotify.previous());
+  handle('spotify:seek', (positionMs) => spotify.seek(parseInteger(positionMs, 'positionMs', 0, MAX_POSITION_MS)));
+  handle('spotify:volume', (percent) => spotify.volume(parseInteger(percent, 'percent', 0, 100)));
+  handle('spotify:shuffle', (on) => spotify.shuffle(parseBoolean(on, 'on')));
+  handle('spotify:repeat', (mode) => spotify.repeat(parseOneOf(mode, 'mode', SPOTIFY_REPEAT) as SpotifyRepeat));
   handle('spotify:transfer', (deviceId) => spotify.transfer(parsePattern(deviceId, 'deviceId', SPOTIFY_DEVICE)));
+
+  handle('weather:current', () => context.weather.current());
+  handle('holidays:list', (year) => context.holidays.list(parseInteger(year, 'year', 1975, 2100)));
 
   handle('categories:list', () => backend.request('GET', '/api/v1/categories'));
   handle('categories:create', (input) => backend.request('POST', '/api/v1/categories', createCategory(input)));
@@ -487,6 +527,21 @@ function eventFields(input: Fields): Fields {
   if (input.endDateExclusive !== undefined) {
     event.endDateExclusive = parseDate(input.endDateExclusive, 'endDateExclusive');
   }
+  if (input.repeat !== undefined) {
+    event.repeat = nullable(input.repeat, (v) => parseOneOf(v, 'repeat', EVENT_REPEATS));
+  }
+  if (input.repeatUntil !== undefined) {
+    event.repeatUntil = nullable(input.repeatUntil, (v) => parseDate(v, 'repeatUntil'));
+  }
+  if (input.repeatDates !== undefined) {
+    event.repeatDates = parseList(input.repeatDates, 'repeatDates', MAX_REPEAT_DATES, (v) => parseDate(v, 'repeatDates'));
+  }
+  if (input.repeatWeekdays !== undefined) {
+    event.repeatWeekdays = parseList(input.repeatWeekdays, 'repeatWeekdays', 7, (v) => parseOneOf(v, 'repeatWeekdays', WEEKDAYS));
+  }
+  if (input.links !== undefined) {
+    event.links = parseList(input.links, 'links', MAX_LINKS, (v) => parseText(v, 'links', MAX_LINK_CHARS));
+  }
   return event;
 }
 
@@ -498,6 +553,13 @@ function saveReview(value: unknown): Fields {
     obstacles: parseText(input.obstacles, 'obstacles', MAX_DESCRIPTION_CHARS),
     tomorrowPriority: parseText(input.tomorrowPriority, 'tomorrowPriority', MAX_DESCRIPTION_CHARS),
   };
+}
+
+function parseList<T>(value: unknown, field: string, maxItems: number, parse: (item: unknown) => T): T[] {
+  if (!Array.isArray(value) || value.length > maxItems) {
+    throw new InvalidPayload(`${field} must be a list of at most ${maxItems} items.`);
+  }
+  return value.map(parse);
 }
 
 function parsePattern(value: unknown, field: string, pattern: RegExp): string {

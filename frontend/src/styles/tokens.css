@@ -2,6 +2,8 @@
 :root {
   --color-app-bg: #20242c;
   --color-sidebar: #252a33;
+  /* The window's title bar; desktop/src/main.ts gives Windows' buttons the same colour. */
+  --color-titlebar: #181b21;
   --color-surface: #2b303b;
   --color-elevated: #323947;
   --color-border: #404855;
@@ -34,5 +36,7 @@
   --space-6: 32px;
 
   --font-family: 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
+  /* Matches TITLE_BAR_HEIGHT in desktop/src/main.ts. */
+  --titlebar-height: 56px;
   --focus-ring: 0 0 0 2px var(--color-app-bg), 0 0 0 4px var(--color-primary);
 }

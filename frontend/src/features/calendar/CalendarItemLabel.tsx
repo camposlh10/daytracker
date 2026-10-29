@@ -1,8 +1,9 @@
-import type { CalendarItem, TaskStatus } from '../../api/bridge';
+import type { TaskStatus } from '../../api/bridge';
 import { formatTime } from '../../lib/dates';
 import { CoverThumb } from '../reading/CoverThumb';
 import { pages } from '../reading/readingLabels';
 import { PRIORITY_LABELS, STATUS_LABELS } from '../tasks/taskLabels';
+import type { DayItem } from './holidays';
 import styles from './CalendarItemLabel.module.css';
 
 // Status is carried by the symbol's shape as well as its color.
@@ -21,7 +22,21 @@ export function StatusSymbol({ status }: { status: TaskStatus }) {
 }
 
 /** One compact line for an item inside a calendar cell. */
-export function CalendarItemLabel({ item }: { item: CalendarItem }) {
+export function CalendarItemLabel({ item }: { item: DayItem }) {
+  if (item.type === 'HOLIDAY') {
+    // The country's own name is in the tooltip when it differs.
+    return (
+      <span
+        className={`${styles.item} ${styles.holiday}`}
+        title={item.localName && item.localName !== item.title ? `${item.title} (${item.localName})` : item.title}
+      >
+        <span className={styles.lead} role="img" aria-label="Holiday">
+          ★
+        </span>
+        <span className={styles.title}>{item.title}</span>
+      </span>
+    );
+  }
   if (item.type === 'EVENT') {
     // A timed event shows its start time on its first day; later days of a
     // longer event, and all-day events, show a marker instead.

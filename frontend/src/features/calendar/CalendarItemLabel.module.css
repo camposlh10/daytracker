@@ -68,3 +68,12 @@
   color: var(--color-text-secondary);
   text-decoration: line-through;
 }
+
+/* A public holiday: a gold star and name, quieter than an appointment. */
+.holiday {
+  color: var(--color-warning);
+}
+
+.holiday .title {
+  color: var(--color-warning);
+}

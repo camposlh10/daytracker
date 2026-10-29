@@ -35,6 +35,9 @@ const fake = {
   // How many more play commands fail as if nothing were playing.
   idlePlays: 0,
   lastTransfer: null,
+  lastCommand: null,
+  episode: false,
+  lastPlaybackQuery: null,
 };
 let counter = 0;
 const server = createServer(async (request, response) => {
@@ -119,8 +122,35 @@ const server = createServer(async (request, response) => {
       });
     }
     if (route === 'GET /v1/me/playlists') return json(200, { items: [{ uri: 'spotify:playlist:1111111111111111111111', name: 'Mine', owner: { display_name: 'Ana' }, tracks: { total: 3 }, images: [] }] });
+    if (route === 'GET /v1/playlists/1111111111111111111111/items') {
+      fake.lastItemsQuery = url.searchParams;
+      const offset = Number(url.searchParams.get('offset'));
+      return json(200, {
+        total: 3,
+        next: offset === 0 ? 'more' : null,
+        items:
+          offset === 0
+            ? [
+                { item: { type: 'track', uri: `spotify:track:${TRACK_ID}`, name: 'Clair de Lune', artists: [{ name: 'Debussy' }], album: { name: 'Suite', images: [] }, duration_ms: 300000 } },
+                { item: null },
+              ]
+            : [{ track: { type: 'track', uri: 'spotify:track:2222222222222222222222', name: 'Older shape', artists: [], album: { images: [] } } }],
+      });
+    }
+    if (route === 'GET /v1/playlists/3333333333333333333333/items') return json(403, { error: { status: 403, message: 'Forbidden' } });
+    if (route === 'GET /v1/me/tracks') {
+      if (fake.noLibraryScope) return json(403, { error: { status: 403, message: 'Insufficient client scope' } });
+      return json(200, { total: 1, next: null, items: [{ added_at: 'x', track: { type: 'track', uri: `spotify:track:${TRACK_ID}`, name: 'Liked one', artists: [], album: { images: [] } } }] });
+    }
     if (route === 'GET /v1/me/player/devices') return json(200, { devices: fake.devices });
-    if (route === 'GET /v1/me/player') return fake.nothingPlaying ? json(204) : json(200, { is_playing: true, progress_ms: 1234, device: { name: 'Laptop' }, item: { type: 'track', uri: `spotify:track:${TRACK_ID}`, name: 'Clair de Lune', artists: [], album: { images: [] } } });
+    if (route === 'GET /v1/me/player') {
+      fake.lastPlaybackQuery = url.searchParams;
+      if (fake.nothingPlaying) return json(204);
+      const item = fake.episode
+        ? { type: 'episode', uri: 'spotify:episode:512ojhOuo1ktJprKbVcKyQ', name: 'Rain at night', duration_ms: 36608000, images: [{ url: 'https://i.scdn.co/image/' + 'c'.repeat(40), width: 300 }], show: { name: 'Relaxing SoundZzz', publisher: 'Someone' } }
+        : { type: 'track', uri: `spotify:track:${TRACK_ID}`, name: 'Clair de Lune', artists: [], album: { images: [] } };
+      return json(200, { is_playing: true, progress_ms: 1234, shuffle_state: true, repeat_state: 'context', device: { name: 'Laptop', volume_percent: 64, supports_volume: true }, item });
+    }
     if (url.pathname.startsWith('/v1/me/player')) {
       if (fake.nextPlayerError) {
         const error = fake.nextPlayerError;
@@ -136,6 +166,7 @@ const server = createServer(async (request, response) => {
         fake.lastPlayQuery = url.searchParams;
       }
       if (route === 'PUT /v1/me/player') fake.lastTransfer = JSON.parse(body);
+      fake.lastCommand = `${route}?${url.searchParams}`;
       return json(204);
     }
   }
@@ -205,6 +236,7 @@ try {
   check(params.get('code_challenge_method') === 'S256' && params.get('response_type') === 'code' && !params.has('client_secret'), 'it uses PKCE and no client secret');
   check(/^http:\/\/127\.0\.0\.1:\d+\/callback$/.test(params.get('redirect_uri')), 'the answer comes back to a loopback address with a free port');
   check(params.get('scope').includes('user-modify-playback-state') && params.get('scope').includes('user-read-playback-state'), 'it asks only for playback and playlist scopes');
+  check(params.get('scope').includes('user-library-read') && params.get('scope').includes('playlist-read-collaborative'), 'it asks to read Liked Songs and collaborative playlists');
   check(saved.refreshToken?.startsWith('refresh-') && !JSON.stringify(saved).includes('access-'), 'only the refresh token is stored, never the access token');
 
   console.log('Using the API');
@@ -218,11 +250,35 @@ try {
   const devices = await client.devices();
   check(devices.ok && devices.data.length === 1 && devices.data[0].isActive, 'devices without an id are skipped');
   const playback = await client.playback();
-  check(playback.ok && playback.data.isPlaying && playback.data.track.name === 'Clair de Lune' && playback.data.deviceName === 'Laptop', 'what is playing is reported');
+  check(playback.ok && playback.data.isPlaying && playback.data.track.name === 'Clair de Lune' && playback.data.track.kind === 'track' && playback.data.deviceName === 'Laptop', 'what is playing is reported');
+  check(playback.data?.volumePercent === 64 && playback.data.shuffle === true && playback.data.repeat === 'context', 'volume, shuffle and repeat are reported');
+  check(fake.lastPlaybackQuery?.get('additional_types') === 'track,episode', 'podcast episodes are asked for too');
+  fake.episode = true;
+  const episode = await client.playback();
+  const item = episode.data?.track;
+  check(item?.kind === 'episode' && item.name === 'Rain at night' && item.artists === 'Relaxing SoundZzz' && item.durationMs === 36608000 && item.imageId === 'c'.repeat(40), 'a podcast episode is reported with its show and cover');
+  fake.episode = false;
   fake.nothingPlaying = true;
   const idle = await client.playback();
   check(idle.ok && idle.data === null, 'nothing playing is reported as nothing');
   fake.nothingPlaying = false;
+
+  console.log('Library');
+  const page = await client.playlistItems('1111111111111111111111');
+  check(page.ok && page.data.tracks.length === 1 && page.data.tracks[0].name === 'Clair de Lune' && page.data.total === 3 && page.data.nextOffset === 2, 'a playlist page lists its playable songs, its total and where the next page starts');
+  check(fake.lastItemsQuery.get('limit') === '50' && fake.lastItemsQuery.get('offset') === '0', 'pages are 50 songs');
+  const second = await client.playlistItems('1111111111111111111111', 2);
+  check(second.ok && second.data.tracks[0].name === 'Older shape' && second.data.nextOffset === null, 'the older "track" shape is read too, and the last page says so');
+  const hidden = await client.playlistItems('3333333333333333333333');
+  check(!hidden.ok && hidden.error.code === 'SPOTIFY_PLAYLIST_HIDDEN' && hidden.error.message.includes('can still be played'), 'a playlist Spotify will not list says it can still be played');
+  const liked = await client.likedSongs();
+  check(liked.ok && liked.data.tracks[0].name === 'Liked one', 'Liked Songs are listed');
+  fake.noLibraryScope = true;
+  const reconnect = await client.likedSongs();
+  check(!reconnect.ok && reconnect.error.code === 'SPOTIFY_RECONNECT', 'a connection without the Liked Songs permission is asked to connect again');
+  fake.noLibraryScope = false;
+  const queued = await client.queue(`spotify:track:${TRACK_ID}`);
+  check(queued.ok && fake.lastCommand === `POST /v1/me/player/queue?uri=spotify%3Atrack%3A${TRACK_ID}`, 'a song is added to the queue');
 
   console.log('Playback control');
   await client.play({ uri: `spotify:track:${TRACK_ID}` });
@@ -231,9 +287,22 @@ try {
   check(fake.lastPlayBody?.context_uri === 'spotify:playlist:37i9dQZF1DXcBWIGoYBM5M' && fake.lastPlayQuery.get('device_id') === 'device1', 'a playlist is played as a context on the chosen device');
   await client.play();
   check(fake.lastPlayBody === null, 'play without a target resumes');
+  await client.play({ uri: `spotify:track:${TRACK_ID}`, contextUri: 'spotify:playlist:1111111111111111111111' });
+  check(fake.lastPlayBody?.context_uri === 'spotify:playlist:1111111111111111111111' && fake.lastPlayBody.offset?.uri === `spotify:track:${TRACK_ID}`, 'a song is played inside its playlist, which carries on after it');
+  await client.play({ uri: `spotify:track:${TRACK_ID}`, uris: ['spotify:track:2222222222222222222222', `spotify:track:${TRACK_ID}`] });
+  check(fake.lastPlayBody?.uris?.length === 2 && fake.lastPlayBody.offset?.uri === `spotify:track:${TRACK_ID}`, 'a liked song is played with the songs listed with it');
   for (const action of ['pause', 'next', 'previous']) {
     const result = await client[action]();
     check(result.ok, `${action} works`);
+  }
+  for (const [action, value, expected] of [
+    ['seek', 90500, 'PUT /v1/me/player/seek?position_ms=90500'],
+    ['volume', 35, 'PUT /v1/me/player/volume?volume_percent=35'],
+    ['shuffle', false, 'PUT /v1/me/player/shuffle?state=false'],
+    ['repeat', 'track', 'PUT /v1/me/player/repeat?state=track'],
+  ]) {
+    const result = await client[action](value);
+    check(result.ok && fake.lastCommand === expected, `${action} is sent as ${expected}`);
   }
   fake.nextPlayerError = { status: 403, reason: 'PREMIUM_REQUIRED', message: 'Player command failed: Premium required' };
   const premium = await client.pause();

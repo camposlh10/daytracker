@@ -1,0 +1,139 @@
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.picker[aria-invalid='true'] {
+  border-color: var(--color-danger);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.title {
+  font-weight: 600;
+}
+
+.arrow {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 999px;
+  color: var(--color-text-secondary);
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.arrow:hover {
+  background: var(--color-elevated);
+  color: var(--color-text);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.table th {
+  padding: 2px 0;
+  color: var(--color-text-secondary);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.table td {
+  padding: 2px 0;
+  text-align: center;
+}
+
+.date {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--color-text);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.date:hover {
+  background: var(--color-elevated);
+}
+
+.outside {
+  color: var(--color-text-secondary);
+}
+
+.chosen,
+.chosen:hover {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  font-weight: 700;
+}
+
+.chosenList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 2px 1px var(--space-2);
+  background: var(--color-elevated);
+  border-radius: 999px;
+  font-size: 0.8rem;
+}
+
+.remove {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 999px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.remove:hover {
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.empty {
+  color: var(--color-text-secondary);
+  font-size: 0.85rem;
+}
+
+@media (forced-colors: active) {
+  .chosen {
+    border-color: Highlight;
+  }
+}

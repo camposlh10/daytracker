@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
 import type { CalendarItem } from '../../api/bridge';
+import type { DayItem } from './holidays';
 import { useCompactHeight } from '../../app/useCompactHeight';
 import {
   dayOfMonth,
@@ -39,7 +40,7 @@ interface TimeGridProps {
   selected: IsoDate;
   today: IsoDate;
   weekStart: WeekStart;
-  itemsByDate: Map<IsoDate, CalendarItem[]>;
+  itemsByDate: Map<IsoDate, DayItem[]>;
   onSelect: (date: IsoDate) => boolean;
   /** An empty part of a day was clicked: start a new appointment there. */
   onCreateAt: (date: IsoDate, minutes: number) => void;
@@ -60,10 +61,10 @@ interface Segment {
   lanes: number;
 }
 
-const NO_ITEMS: CalendarItem[] = [];
+const NO_ITEMS: DayItem[] = [];
 
 /** Appointments of a day or longer belong with the all-day items, as in a paper planner. */
-function isTimed(item: CalendarItem): item is EventItem & { startsAt: string; endsAt: string } {
+function isTimed(item: DayItem): item is EventItem & { startsAt: string; endsAt: string } {
   if (item.type !== 'EVENT' || item.allDay || !item.startsAt || !item.endsAt) {
     return false;
   }
